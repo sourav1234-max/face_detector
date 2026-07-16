@@ -1,0 +1,17 @@
+{
+  "name": "photo-face-search",
+  "version": "1.0.0",
+  "description": "Upload photos and find your face in the gallery using AI",
+  "main": "server.js",
+  "scripts": {
+    "setup": "node setup.js",
+    "build": "node setup.js",
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@vladmandic/face-api": "^1.7.12",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1"
+  }
+}

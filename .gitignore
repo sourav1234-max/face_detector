@@ -1,0 +1,6 @@
+node_modules/
+public/uploads/photo-*
+public/gallery.json
+test_photos/
+.DS_Store
+*.log

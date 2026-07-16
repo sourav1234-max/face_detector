@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FaceMatch AI - Smart Photo Gallery & Search</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Loading Overlay for AI Models -->
+  <div id="models-loader" class="loader-overlay">
+    <div class="loader-card">
+      <div class="loader-spinner"></div>
+      <h2>Initializing AI Engine</h2>
+      <p id="loader-status">Loading Face Recognition models...</p>
+      <div class="loader-progress-bar">
+        <div id="loader-progress" class="loader-progress-fill" style="width: 0%"></div>
+      </div>
+      <p class="loader-subtext">This only happens once on startup. Powered by TensorFlow.js</p>
+    </div>
+  </div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-icon">
+          <i class="fa-solid fa-face-viewfinder"></i>
+        </div>
+        <div class="logo-text">
+          <h1>FaceMatch <span>AI</span></h1>
+          <p>Smart Photo Gallery & Face Search</p>
+        </div>
+      </div>
+
+      <!-- Tab Switchers -->
+      <nav class="app-nav">
+        <button class="nav-btn active" data-tab="upload-tab">
+          <i class="fa-solid fa-cloud-arrow-up"></i> Upload Gallery
+        </button>
+        <button class="nav-btn" data-tab="search-tab" id="nav-search-btn">
+          <i class="fa-solid fa-magnifying-glass-face"></i> Find My Photos
+        </button>
+      </nav>
+    </header>
+
+    <!-- Main Content -->
+    <main class="app-main">
+      
+      <!-- TAB 1: UPLOAD GALLERY -->
+      <section id="upload-tab" class="tab-content active">
+        <div class="grid-layout">
+          <!-- Upload Sidebar Panel -->
+          <div class="sidebar-panel">
+            <div class="panel-card">
+              <div class="card-header">
+                <h2>Upload New Photos</h2>
+                <p>Add photos to the searchable gallery</p>
+              </div>
+              
+              <!-- Drag and Drop Zone -->
+              <div class="upload-zone" id="upload-drag-zone">
+                <input type="file" id="gallery-file-input" multiple accept="image/*" class="file-input-hidden">
+                <div class="zone-prompt">
+                  <i class="fa-solid fa-images zone-icon"></i>
+                  <p class="main-prompt">Drag & drop images here</p>
+                  <p class="sub-prompt">or click to browse from device</p>
+                  <span class="file-badge">JPEG, PNG, WebP</span>
+                </div>
+              </div>
+
+              <!-- Upload Queue / Preview -->
+              <div class="upload-queue-container hidden" id="upload-queue-container">
+                <h3>Selected Photos (<span id="queue-count">0</span>)</h3>
+                
+                <div class="preview-carousel" id="preview-carousel">
+                  <!-- Dynamic preview items go here -->
+                </div>
+
+                <!-- Overall Progress and Upload Buttons -->
+                <div class="queue-actions">
+                  <div class="queue-status-text" id="queue-status-text">Ready to upload</div>
+                  <div class="progress-bar-container">
+                    <div class="progress-bar-fill" id="upload-progress-fill" style="width: 0%"></div>
+                  </div>
+                  <div class="action-buttons">
+                    <button class="btn btn-secondary" id="clear-queue-btn">
+                      <i class="fa-solid fa-trash-can"></i> Clear
+                    </button>
+                    <button class="btn btn-primary" id="start-upload-btn">
+                      <i class="fa-solid fa-arrow-up-from-bracket"></i> Upload to Gallery
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Face-API.js model confirmation card -->
+            <div class="panel-card info-card">
+              <i class="fa-solid fa-shield-halved info-icon"></i>
+              <div>
+                <h4>Local AI Processing</h4>
+                <p>Face detection is performed directly in your browser. Only the face descriptors (coordinates & feature arrays) are uploaded to secure photo matches.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Gallery Viewer -->
+          <div class="main-panel">
+            <div class="panel-card gallery-card">
+              <div class="gallery-header">
+                <div>
+                  <h2>Gallery Catalog</h2>
+                  <p>Browse through <span id="gallery-total-count">0</span> uploaded photo(s)</p>
+                </div>
+                <div class="gallery-controls">
+                  <button class="btn-icon" id="refresh-gallery-btn" title="Refresh Gallery">
+                    <i class="fa-solid fa-rotate-right"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Empty Gallery Placeholder -->
+              <div class="empty-gallery-state" id="empty-gallery-state">
+                <i class="fa-regular fa-image empty-icon"></i>
+                <h3>No Photos in Gallery</h3>
+                <p>Upload photos using the panel on the left to start building your gallery catalog.</p>
+              </div>
+
+              <!-- Gallery Grid -->
+              <div class="gallery-grid hidden" id="gallery-grid">
+                <!-- Gallery items dynamically created -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: FIND MY PHOTOS (FACE SEARCH) -->
+      <section id="search-tab" class="tab-content">
+        <div class="grid-layout">
+          <!-- Face Search Panel -->
+          <div class="sidebar-panel">
+            <div class="panel-card">
+              <div class="card-header">
+                <h2>Face Search</h2>
+                <p>Upload your photo to find matches in the gallery</p>
+              </div>
+
+              <!-- Toggle for File vs Camera -->
+              <div class="input-toggle-container">
+                <button class="toggle-btn active" id="toggle-file-mode">
+                  <i class="fa-solid fa-file-image"></i> Photo File
+                </button>
+                <button class="toggle-btn" id="toggle-camera-mode">
+                  <i class="fa-solid fa-camera"></i> Live Camera
+                </button>
+              </div>
+
+              <!-- Search Photo Drop Zone -->
+              <div class="search-upload-zone" id="search-drag-zone">
+                <input type="file" id="search-file-input" accept="image/*" class="file-input-hidden">
+                <div class="zone-prompt" id="search-upload-prompt">
+                  <i class="fa-solid fa-user-astronaut zone-icon search-icon-color"></i>
+                  <p class="main-prompt">Upload your portrait</p>
+                  <p class="sub-prompt">Drag or click to choose photo</p>
+                </div>
+                <div class="search-preview-container hidden" id="search-preview-container">
+                  <canvas id="search-preview-canvas" class="preview-canvas"></canvas>
+                  <button class="remove-preview-btn" id="remove-search-file-btn" title="Remove Photo">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Camera View Zone -->
+              <div class="camera-zone hidden" id="camera-zone">
+                <div class="camera-stream-wrapper">
+                  <video id="webcam-video" autoplay playsinline muted></video>
+                  <canvas id="webcam-overlay" class="webcam-canvas-overlay"></canvas>
+                </div>
+                <div class="camera-controls">
+                  <button class="btn btn-secondary" id="stop-camera-btn">
+                    <i class="fa-solid fa-video-slash"></i> Stop
+                  </button>
+                  <button class="btn btn-primary btn-pulse" id="capture-photo-btn">
+                    <i class="fa-solid fa-shutter-button"></i> Capture & Search
+                  </button>
+                </div>
+              </div>
+
+              <!-- Match Sensitivity Slider -->
+              <div class="slider-group">
+                <div class="slider-labels">
+                  <label for="threshold-slider">Match Precision</label>
+                  <span id="threshold-val">Strict (0.50)</span>
+                </div>
+                <input type="range" id="threshold-slider" min="0.30" max="0.75" step="0.05" value="0.50" class="slider-input">
+                <div class="slider-ticks">
+                  <span>Strict</span>
+                  <span>Balanced</span>
+                  <span>Loose</span>
+                </div>
+              </div>
+
+              <!-- Search Controls -->
+              <div class="search-actions-container">
+                <button class="btn btn-primary btn-block disabled" id="execute-search-btn">
+                  <i class="fa-solid fa-magnifying-glass-chart"></i> Search Gallery
+                </button>
+              </div>
+            </div>
+
+            <!-- Face Detection Feedback Card -->
+            <div class="panel-card feedback-card hidden" id="search-feedback-card">
+              <h4 id="feedback-title"><i class="fa-solid fa-circle-notch fa-spin"></i> Processing</h4>
+              <p id="feedback-desc">Initializing detection...</p>
+            </div>
+          </div>
+
+          <!-- Matching Gallery Viewer -->
+          <div class="main-panel">
+            <div class="panel-card gallery-card">
+              <div class="gallery-header">
+                <div>
+                  <h2>Matches Found</h2>
+                  <p id="search-results-summary">Select a photo on the left or snap a selfie to search</p>
+                </div>
+                <div class="gallery-controls">
+                  <button class="btn btn-secondary hidden" id="download-all-matches-btn">
+                    <i class="fa-solid fa-file-zipper"></i> Download All Matches
+                  </button>
+                </div>
+              </div>
+
+              <!-- Empty Matches State -->
+              <div class="empty-gallery-state" id="empty-search-state">
+                <i class="fa-solid fa-people-arrows empty-icon matches-empty-icon-color"></i>
+                <h3 id="empty-search-title">No Search Query Active</h3>
+                <p id="empty-search-desc">Upload a photo containing a clear face or snap a live webcam picture, then click 'Search Gallery' to retrieve matching files.</p>
+              </div>
+
+              <!-- Search Results Grid -->
+              <div class="gallery-grid hidden" id="search-grid">
+                <!-- Dynamic search result cards -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer-bar">
+      <p>&copy; 2026 FaceMatch AI. All face analysis processing is secure, client-side, and privacy-protected.</p>
+    </footer>
+  </div>
+
+  <!-- Image Details Lightbox Modal -->
+  <div id="lightbox-modal" class="lightbox-modal">
+    <span class="lightbox-close" id="lightbox-close-btn">&times;</span>
+    <div class="lightbox-content-wrapper">
+      <div class="lightbox-image-container">
+        <img id="lightbox-img" src="" alt="Full view">
+        <canvas id="lightbox-canvas" class="lightbox-canvas-overlay"></canvas>
+      </div>
+      <div class="lightbox-sidebar">
+        <h3>Photo Details</h3>
+        <div class="detail-item">
+          <span class="detail-label">Original Filename</span>
+          <span class="detail-value" id="detail-filename">photo.jpg</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Upload Timestamp</span>
+          <span class="detail-value" id="detail-date">July 16, 2026, 6:00 PM</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Detected Faces</span>
+          <span class="detail-value" id="detail-faces">2 face(s)</span>
+        </div>
+        
+        <div class="lightbox-actions">
+          <a id="lightbox-download-link" href="" download class="btn btn-primary btn-block text-center">
+            <i class="fa-solid fa-download"></i> Download Full Photo
+          </a>
+          <button id="lightbox-delete-btn" class="btn btn-danger btn-block">
+            <i class="fa-solid fa-trash-can"></i> Delete from Gallery
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JSZip CDN for "Download All" feature -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- Load Local Face-API.js distribution -->
+  <script src="js/face-api.js"></script>
+  <!-- App JS Logic -->
+  <script src="js/app.js"></script>
+</body>
+</html>
