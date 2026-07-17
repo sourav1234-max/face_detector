@@ -385,85 +385,6 @@ app.get('/api/gallery', (req, res) => {
 });
 
 // Python Face Detection Helper
-function runPythonFaceDetection(filePath) {
-  return new Promise((resolve, reject) => {
-    const { spawn } = require('child_process');
-    const scriptPath = path.join(__dirname, 'detect_faces.py');
-    const pythonCandidates = [];
-
-    if (process.env.PYTHON_CMD) {
-      pythonCandidates.push(process.env.PYTHON_CMD);
-    }
-
-    if (process.platform === 'win32') {
-      pythonCandidates.push('py', 'python', 'python3');
-    } else {
-      pythonCandidates.push('python3', 'python');
-    }
-
-    const tryNextCommand = (index) => {
-      const command = pythonCandidates[index];
-      if (!command) {
-        reject(new Error('Unable to find a Python executable for face detection.'));
-        return;
-      }
-
-      const args = command.toLowerCase() === 'py' && process.platform === 'win32'
-        ? ['-3', scriptPath, filePath]
-        : [scriptPath, filePath];
-
-      const pythonProcess = spawn(command, args);
-      let stdoutData = '';
-      let stderrData = '';
-
-      pythonProcess.stdout.on('data', (data) => {
-        stdoutData += data.toString();
-      });
-
-      pythonProcess.stderr.on('data', (data) => {
-        stderrData += data.toString();
-      });
-
-      pythonProcess.on('error', (err) => {
-        if (err.code === 'ENOENT' && index + 1 < pythonCandidates.length) {
-          tryNextCommand(index + 1);
-        } else {
-          reject(new Error(`Python process could not start: ${err.message}`));
-        }
-      });
-
-      pythonProcess.on('close', (code) => {
-        if (code !== 0) {
-          if (index + 1 < pythonCandidates.length) {
-            tryNextCommand(index + 1);
-            return;
-          }
-
-          const dependencyMatch = stderrData.match(/ModuleNotFoundError:\s+No module named ['"](.+)['"]/i);
-          let errorMessage = `Python process exited with code ${code}. Stderr: ${stderrData}`;
-          if (dependencyMatch) {
-            errorMessage = `Missing Python module: ${dependencyMatch[1]}. Install dependencies with 'python -m pip install -r requirements.txt'.`;
-          }
-          reject(new Error(errorMessage));
-          return;
-        }
-        try {
-          const result = JSON.parse(stdoutData.trim());
-          if (!result.success) {
-            reject(new Error(result.error || 'Unknown Python error'));
-          } else {
-            resolve(result.faces);
-          }
-        } catch (parseErr) {
-          reject(new Error(`Failed to parse Python output: ${stdoutData}. Error: ${parseErr.message}`));
-        }
-      });
-    };
-
-    tryNextCommand(0);
-  });
-}
-
 // Global lock/queue for uploads to prevent race conditions and Google Drive rate limits
 let uploadProcessingQueue = Promise.resolve();
 
@@ -473,15 +394,17 @@ async function processUploadTask(req) {
   const isAdmin = isValidAdminSession(req);
 
   const tempFilePath = path.join(__dirname, 'public', 'uploads', req.file.filename);
-  
-  // Run face detection on the uploaded image using Python
+
   let descriptors = [];
-  try {
-    console.log(`[Python AI] Analyzing face descriptors for ${req.file.filename}...`);
-    descriptors = await runPythonFaceDetection(tempFilePath);
-    console.log(`[Python AI] Face analysis complete. Detected ${descriptors.length} face(s).`);
-  } catch (aiErr) {
-    console.error('[Python AI] Face detection failed:', aiErr.message);
+  if (req.body.descriptors) {
+    try {
+      descriptors = typeof req.body.descriptors === 'string'
+        ? JSON.parse(req.body.descriptors)
+        : req.body.descriptors;
+    } catch (parseErr) {
+      console.warn('Invalid descriptors payload on upload, storing empty face descriptors.');
+      descriptors = [];
+    }
   }
 
   let filename = req.file.filename;
@@ -551,52 +474,14 @@ app.post('/api/upload', upload.single('photo'), async (req, res) => {
 });
 
 // 3. Search API (Public access - secure server-side matching)
-app.post('/api/search', upload.single('photo'), async (req, res) => {
-  let tempSearchPath = '';
-  let isTempFile = false;
-
+app.post('/api/search', async (req, res) => {
   try {
-    const threshold = req.body.threshold;
-    const limit = threshold !== undefined ? parseFloat(threshold) : 0.5;
+    const limit = req.body.threshold !== undefined ? parseFloat(req.body.threshold) : 0.5;
+    const queryDescriptor = req.body.descriptor || req.body.queryDescriptor;
 
-    if (req.file) {
-      tempSearchPath = path.join(__dirname, 'public', 'uploads', req.file.filename);
-      isTempFile = true;
-    } else if (req.body.photo && req.body.photo.startsWith('data:image')) {
-      // Decode webcam base64 photo
-      const base64Data = req.body.photo.replace(/^data:image\/\w+;base64,/, '');
-      const buffer = Buffer.from(base64Data, 'base64');
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      const tempFilename = `search-temp-${uniqueSuffix}.jpg`;
-      tempSearchPath = path.join(__dirname, 'public', 'uploads', tempFilename);
-      
-      const uploadDir = path.join(__dirname, 'public', 'uploads');
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true });
-      }
-      
-      fs.writeFileSync(tempSearchPath, buffer);
-      isTempFile = true;
-    } else {
-      return res.status(400).json({ success: false, error: 'No search image or descriptor provided' });
+    if (!queryDescriptor || !Array.isArray(queryDescriptor)) {
+      return res.status(400).json({ success: false, error: 'No face descriptor provided for search' });
     }
-
-    // Run Python Face Detection to extract descriptor
-    console.log(`[Python AI] Running face detection on search query...`);
-    const detectedFaces = await runPythonFaceDetection(tempSearchPath);
-    console.log(`[Python AI] Detected ${detectedFaces.length} face(s) in search query.`);
-
-    // Clean up temporary search file
-    if (isTempFile && fs.existsSync(tempSearchPath)) {
-      fs.unlinkSync(tempSearchPath);
-    }
-
-    if (detectedFaces.length === 0) {
-      return res.json({ success: true, matches: [], message: 'No face detected in the search image' });
-    }
-
-    // Use the first face found in the search query image
-    const queryDescriptor = detectedFaces[0].descriptor;
 
     const gallery = readGalleryDb();
     const matches = [];
@@ -621,9 +506,8 @@ app.post('/api/search', upload.single('photo'), async (req, res) => {
       let minDistance = 999;
 
       photo.descriptors.forEach(faceData => {
-        // Handle both older flat array descriptors or new structure containing {box, descriptor}
         const desc = Array.isArray(faceData) ? faceData : faceData.descriptor;
-        if (!desc) return;
+        if (!desc || !Array.isArray(desc)) return;
 
         const dist = getEuclideanDistance(queryDescriptor, desc);
         if (dist < minDistance) {
@@ -647,7 +531,6 @@ app.post('/api/search', upload.single('photo'), async (req, res) => {
       }
     });
 
-    // Sort matches by confidence descending (distance ascending)
     matches.sort((a, b) => a.distance - b.distance);
 
     res.json({ success: true, matches: matches });

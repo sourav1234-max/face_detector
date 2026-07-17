@@ -6,6 +6,7 @@
 window.galleryCatalog = [];
 window.uploadQueue = [];
 window.queryDescriptor = null;
+window.searchQueryDescriptor = null;
 window.webcamStream = null;
 window.isWebcamActive = false;
 window.faceApiLoaded = false;
@@ -14,6 +15,69 @@ window.faceApiLoaded = false;
 const LOCAL_MODEL_PATH = '/models';
 const CDN_MODEL_PATH = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 let modelPath = LOCAL_MODEL_PATH;
+
+async function loadFaceApiModels() {
+  if (window.faceApiLoaded) return;
+
+  try {
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
+      faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
+      faceapi.nets.faceRecognitionNet.loadFromUri(modelPath)
+    ]);
+    window.faceApiLoaded = true;
+  } catch (err) {
+    console.warn('Local face-api models failed to load, falling back to CDN:', err);
+    modelPath = CDN_MODEL_PATH;
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
+      faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
+      faceapi.nets.faceRecognitionNet.loadFromUri(modelPath)
+    ]);
+    window.faceApiLoaded = true;
+  }
+}
+
+function loadImageElement(source) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Could not load image for face detection.'));
+
+    if (typeof source === 'string') {
+      img.src = source;
+    } else if (source instanceof File || source instanceof Blob) {
+      const objectUrl = URL.createObjectURL(source);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(img);
+      };
+      img.src = objectUrl;
+    } else {
+      reject(new Error('Unsupported image source type for face detection.'));
+    }
+  });
+}
+
+async function computeFaceDescriptors(source) {
+  await loadFaceApiModels();
+
+  const img = await loadImageElement(source);
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.5 });
+  const detections = await faceapi.detectAllFaces(img, options).withFaceLandmarks().withFaceDescriptors();
+
+  return detections.map(detection => ({
+    box: {
+      x: Math.round(detection.detection.box.left),
+      y: Math.round(detection.detection.box.top),
+      width: Math.round(detection.detection.box.width),
+      height: Math.round(detection.detection.box.height)
+    },
+    descriptor: Array.from(detection.descriptor)
+  }));
+}
 // Limits to protect browser memory
 const MAX_UPLOAD_SIZE = 30 * 1024 * 1024; // 30 MB per file
 const MAX_UPLOAD_QUEUE = 20; // max files in client-side queue
@@ -34,11 +98,15 @@ function getPhotoUrl(filename) {
 
 // --- Initialize and Load Models ---
 async function initFaceApi() {
-  window.faceApiLoaded = true;
-  const loader = document.getElementById('models-loader');
-  if (loader) {
-    loader.style.opacity = '0';
-    setTimeout(() => loader.classList.add('hidden'), 500);
+  try {
+    await loadFaceApiModels();
+    const loader = document.getElementById('models-loader');
+    if (loader) {
+      loader.style.opacity = '0';
+      setTimeout(() => loader.classList.add('hidden'), 500);
+    }
+  } catch (err) {
+    console.error('Face API model load failed:', err);
   }
   // Fetch initial gallery files
   await fetchGallery();
@@ -72,10 +140,11 @@ async function fetchGallery() {
   }
 }
 
-// Upload photo with metadata
-async function uploadPhoto(file) {
+// Upload photo with client-side descriptors
+async function uploadPhoto(file, descriptors = []) {
   const formData = new FormData();
   formData.append('photo', file);
+  formData.append('descriptors', JSON.stringify(descriptors));
 
   try {
     const response = await fetch('/api/upload', {
@@ -343,17 +412,32 @@ async function startBatchUpload() {
     const item = uploadable[i];
     item.status = 'uploading';
     const statusEl = document.getElementById(`${item.id}-status`);
-    statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading...`;
+    statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Computing face data...`;
+
+    statusText.innerText = `Analyzing image ${i + 1}/${uploadable.length}...`;
+
+    let descriptors = [];
+    try {
+      descriptors = await computeFaceDescriptors(item.file);
+      if (descriptors.length === 0) {
+        statusEl.innerHTML = `<i class="fa-solid fa-circle-exclamation" style="color:#f59e0b"></i> No face detected`;
+      } else {
+        statusEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face data ready`;
+      }
+    } catch (err) {
+      console.error('Descriptor computation failed for upload:', err);
+      descriptors = [];
+      statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Face analysis failed`;
+    }
 
     statusText.innerText = `Uploading image ${i + 1}/${uploadable.length}...`;
-
-    const res = await uploadPhoto(item.file);
+    const res = await uploadPhoto(item.file, descriptors);
     
     if (res.success) {
       successCount++;
       item.status = 'done';
       statusEl.className = 'preview-status ready';
-      statusEl.innerHTML = `<i class="fa-solid fa-clock"></i> Uploaded (Pending)`;
+      statusEl.innerHTML = `<i class="fa-solid fa-clock"></i> Uploaded`;
       
       // Animate single removal from list
       setTimeout(() => {
@@ -581,7 +665,7 @@ function setupSearchTabEvents() {
 
   // Run Search
   searchBtn.addEventListener('click', () => {
-    if (window.searchQueryImage) {
+    if (window.searchQueryDescriptor) {
       performSearch();
     }
   });
@@ -629,7 +713,7 @@ async function handleSearchFileSelected(file) {
     // Keep a reference so we can revoke on clear
     window.searchQueryObjectUrl = url;
 
-    img.onload = () => {
+    img.onload = async () => {
       const ctx = canvas.getContext('2d');
       canvas.width = img.width;
       canvas.height = img.height;
@@ -637,6 +721,26 @@ async function handleSearchFileSelected(file) {
       try { URL.revokeObjectURL(url); } catch (e) {}
       // clear stored object url since it's revoked
       window.searchQueryObjectUrl = null;
+
+      // Compute descriptors immediately
+      try {
+        const descriptors = await computeFaceDescriptors(file);
+        window.searchQueryDescriptor = descriptors.length > 0 ? descriptors[0].descriptor : null;
+        if (!window.searchQueryDescriptor) {
+          document.getElementById('feedback-title').innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Detected`;
+          document.getElementById('feedback-desc').innerText = 'Please choose another photo with a clear face.';
+          document.getElementById('execute-search-btn').classList.add('disabled');
+        } else {
+          document.getElementById('feedback-title').innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face Detected`;
+          document.getElementById('feedback-desc').innerText = 'Ready to search the gallery.';
+          document.getElementById('execute-search-btn').classList.remove('disabled');
+        }
+      } catch (faceErr) {
+        console.error('Face detection error:', faceErr);
+        document.getElementById('feedback-title').innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Detection Failed`;
+        document.getElementById('feedback-desc').innerText = faceErr.message;
+        document.getElementById('execute-search-btn').classList.add('disabled');
+      }
     };
     img.src = url;
   } catch (err) {
@@ -747,13 +851,35 @@ async function captureCameraSearch() {
 
     const base64Data = tempCanvas.toDataURL('image/jpeg');
     window.searchQueryImage = base64Data;
-    
+  document.getElementById('search-file-input').value = '';
+  document.getElementById('search-upload-prompt').classList.add('hidden');
+  document.getElementById('search-preview-container').classList.remove('hidden');
+
+  canvas.width = tempCanvas.width;
+  canvas.height = tempCanvas.height;
+  canvas.getContext('2d').drawImage(tempCanvas, 0, 0);
+
+  try {
+    const descriptors = await computeFaceDescriptors(base64Data);
+    window.searchQueryDescriptor = descriptors.length > 0 ? descriptors[0].descriptor : null;
+    if (!window.searchQueryDescriptor) {
+      feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Detected`;
+      feedbackDesc.innerText = 'Please capture another photo with a clear face.';
+      document.getElementById('execute-search-btn').classList.add('disabled');
+      return;
+    }
     feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Captured!`;
-    feedbackDesc.innerText = "Performing search...";
+    feedbackDesc.innerText = 'Face detected, ready to search.';
+    document.getElementById('execute-search-btn').classList.remove('disabled');
+  } catch (faceErr) {
+    console.error('Camera face detection error:', faceErr);
+    feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Detection Failed`;
+    feedbackDesc.innerText = faceErr.message;
+    document.getElementById('execute-search-btn').classList.add('disabled');
+    return;
+  }
 
-    // Instantly perform search!
-    performSearch();
-
+  // Automatically perform search if descriptor computed
   } catch (err) {
     console.error("Camera capture search error:", err);
     feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Error`;
@@ -772,18 +898,19 @@ async function performSearch() {
 
   summaryText.innerText = "Searching gallery...";
 
-  try {
-    const formData = new FormData();
-    if (window.searchQueryImage instanceof File) {
-      formData.append('photo', window.searchQueryImage);
-    } else {
-      formData.append('photo', window.searchQueryImage);
-    }
-    formData.append('threshold', threshold);
+  if (!window.searchQueryDescriptor) {
+    summaryText.innerText = "No face descriptor available";
+    return;
+  }
 
+  try {
     const response = await fetch('/api/search', {
       method: 'POST',
-      body: formData
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        descriptor: window.searchQueryDescriptor,
+        threshold: threshold
+      })
     });
     
     const result = await response.json();
