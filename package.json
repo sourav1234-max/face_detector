@@ -12,6 +12,7 @@
   "dependencies": {
     "@vladmandic/face-api": "^1.7.12",
     "express": "^4.21.2",
+    "googleapis": "^173.0.0",
     "multer": "^1.4.5-lts.1"
   }
 }

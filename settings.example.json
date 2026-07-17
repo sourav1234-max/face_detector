@@ -1,0 +1,11 @@
+{
+  "adminPassword": "admin123",
+  "publicGalleryEnabled": true,
+  "logoWidth": 225,
+  "photoRetentionHours": 24,
+  "googleClientId": "",
+  "googleClientSecret": "",
+  "googleRefreshToken": "",
+  "googleConnectedEmail": "",
+  "googleHasDriveScope": false
+}

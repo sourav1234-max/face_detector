@@ -1,60 +1,52 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FaceMatch AI - Smart Photo Gallery & Search</title>
+  <title>Smriti Chitra - Smart Photo Gallery & Search</title>
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet">
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Custom CSS -->
   <link rel="stylesheet" href="css/style.css">
 </head>
+
 <body>
 
-  <!-- Loading Overlay for AI Models -->
-  <div id="models-loader" class="loader-overlay">
-    <div class="loader-card">
-      <div class="loader-spinner"></div>
-      <h2>Initializing AI Engine</h2>
-      <p id="loader-status">Loading Face Recognition models...</p>
-      <div class="loader-progress-bar">
-        <div id="loader-progress" class="loader-progress-fill" style="width: 0%"></div>
-      </div>
-      <p class="loader-subtext">This only happens once on startup. Powered by TensorFlow.js</p>
-    </div>
-  </div>
+
 
   <div class="app-container">
     <!-- Header -->
     <header class="app-header">
       <div class="logo-area">
-        <div class="logo-icon">
-          <i class="fa-solid fa-face-viewfinder"></i>
-        </div>
-        <div class="logo-text">
-          <h1>FaceMatch <span>AI</span></h1>
-          <p>Smart Photo Gallery & Face Search</p>
-        </div>
+        <img src="photos/logo.png" alt="logo" style="width: 88px; height: 88px; object-fit: contain;">
       </div>
 
       <!-- Tab Switchers -->
-      <nav class="app-nav">
+      <nav class="app-nav" style="display: flex; align-items: center; gap: 6px;">
         <button class="nav-btn active" data-tab="upload-tab">
           <i class="fa-solid fa-cloud-arrow-up"></i> Upload Gallery
         </button>
         <button class="nav-btn" data-tab="search-tab" id="nav-search-btn">
           <i class="fa-solid fa-magnifying-glass-face"></i> Find My Photos
         </button>
+        <a href="admin.html" style="text-decoration: none;">
+          <button class="nav-btn" style="color: var(--primary); border: 1px solid rgba(139, 92, 246, 0.2); background: rgba(139, 92, 246, 0.05);">
+            <i class="fa-solid fa-user-shield"></i> Admin Panel
+          </button>
+        </a>
       </nav>
     </header>
 
     <!-- Main Content -->
     <main class="app-main">
-      
+
       <!-- TAB 1: UPLOAD GALLERY -->
       <section id="upload-tab" class="tab-content active">
         <div class="grid-layout">
@@ -65,7 +57,7 @@
                 <h2>Upload New Photos</h2>
                 <p>Add photos to the searchable gallery</p>
               </div>
-              
+
               <!-- Drag and Drop Zone -->
               <div class="upload-zone" id="upload-drag-zone">
                 <input type="file" id="gallery-file-input" multiple accept="image/*" class="file-input-hidden">
@@ -80,7 +72,7 @@
               <!-- Upload Queue / Preview -->
               <div class="upload-queue-container hidden" id="upload-queue-container">
                 <h3>Selected Photos (<span id="queue-count">0</span>)</h3>
-                
+
                 <div class="preview-carousel" id="preview-carousel">
                   <!-- Dynamic preview items go here -->
                 </div>
@@ -102,13 +94,13 @@
                 </div>
               </div>
             </div>
-            
+
             <!-- Face-API.js model confirmation card -->
             <div class="panel-card info-card">
               <i class="fa-solid fa-shield-halved info-icon"></i>
               <div>
-                <h4>Local AI Processing</h4>
-                <p>Face detection is performed directly in your browser. Only the face descriptors (coordinates & feature arrays) are uploaded to secure photo matches.</p>
+                <h4>🌸.....স্মৃতি চিত্র.....🌸   </h4>
+                <p> 👩‍❤️‍👨আপনাদের মিষ্টি মুহূর্তগুলোকে ফ্রেমবন্দী করতে চাইলে  আমাদের সাথে যোগাযোগ করুন <br> Call / Wp... 8388086844 <br>  Owner..Subhajit Pratihar <br>মাজুরিয়া * বাঁকুড়া</p>
               </div>
             </div>
           </div>
@@ -203,7 +195,8 @@
                   <label for="threshold-slider">Match Precision</label>
                   <span id="threshold-val">Strict (0.50)</span>
                 </div>
-                <input type="range" id="threshold-slider" min="0.30" max="0.75" step="0.05" value="0.50" class="slider-input">
+                <input type="range" id="threshold-slider" min="0.30" max="0.75" step="0.05" value="0.50"
+                  class="slider-input">
                 <div class="slider-ticks">
                   <span>Strict</span>
                   <span>Balanced</span>
@@ -245,7 +238,8 @@
               <div class="empty-gallery-state" id="empty-search-state">
                 <i class="fa-solid fa-people-arrows empty-icon matches-empty-icon-color"></i>
                 <h3 id="empty-search-title">No Search Query Active</h3>
-                <p id="empty-search-desc">Upload a photo containing a clear face or snap a live webcam picture, then click 'Search Gallery' to retrieve matching files.</p>
+                <p id="empty-search-desc">Upload a photo containing a clear face or snap a live webcam picture, then
+                  click 'Search Gallery' to retrieve matching files.</p>
               </div>
 
               <!-- Search Results Grid -->
@@ -261,7 +255,7 @@
 
     <!-- Footer -->
     <footer class="app-footer-bar">
-      <p>&copy; 2026 FaceMatch AI. All face analysis processing is secure, client-side, and privacy-protected.</p>
+      <p>&copy; 2026 FaceMatch AI. All face analysis processing is secure, server-side, and privacy-protected.</p>
     </footer>
   </div>
 
@@ -287,7 +281,7 @@
           <span class="detail-label">Detected Faces</span>
           <span class="detail-value" id="detail-faces">2 face(s)</span>
         </div>
-        
+
         <div class="lightbox-actions">
           <a id="lightbox-download-link" href="" download class="btn btn-primary btn-block text-center">
             <i class="fa-solid fa-download"></i> Download Full Photo
@@ -302,9 +296,8 @@
 
   <!-- JSZip CDN for "Download All" feature -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <!-- Load Local Face-API.js distribution -->
-  <script src="js/face-api.js"></script>
   <!-- App JS Logic -->
   <script src="js/app.js"></script>
 </body>
+
 </html>

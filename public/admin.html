@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FaceMatch AI - Administrator Control Panel</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Main CSS -->
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Admin Custom Styling overrides -->
+  <style>
+    /* Admin specific styling */
+    .admin-grid {
+      display: grid;
+      grid-template-columns: 350px 1fr;
+      gap: 24px;
+      margin-top: 12px;
+    }
+
+    @media (max-width: 992px) {
+      .admin-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Stats Grid */
+    .stats-container {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--panel-border);
+      padding: 16px;
+      border-radius: var(--border-radius-md);
+      text-align: center;
+      transition: var(--transition-smooth);
+    }
+
+    .stat-card:hover {
+      background: rgba(255, 255, 255, 0.04);
+      transform: translateY(-2px);
+    }
+
+    .stat-val {
+      font-size: 28px;
+      font-weight: 800;
+      font-family: var(--font-display);
+      margin-top: 4px;
+      color: #fff;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-secondary);
+    }
+
+    .stat-pending .stat-val {
+      color: var(--warning);
+    }
+
+    .stat-approved .stat-val {
+      color: var(--success);
+    }
+
+    .stat-rejected .stat-val {
+      color: var(--danger);
+    }
+
+    /* Mod Table */
+    .table-container {
+      overflow-x: auto;
+      margin-top: 12px;
+    }
+
+    .mod-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 14px;
+    }
+
+    .mod-table th {
+      padding: 14px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid var(--panel-border);
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .mod-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      vertical-align: middle;
+      color: var(--text-primary);
+    }
+
+    .mod-table tr:hover {
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    .thumb-img {
+      width: 54px;
+      height: 54px;
+      border-radius: var(--border-radius-sm);
+      object-fit: cover;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      cursor: pointer;
+    }
+
+    /* Badges */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+
+    .badge-pending {
+      background: rgba(245, 158, 11, 0.1);
+      color: var(--warning);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+
+    .badge-approved {
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    .badge-rejected {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    /* Button adjustments */
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+      border-radius: var(--border-radius-sm);
+      gap: 4px;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    /* Form control */
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .form-input {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--border-radius-sm);
+      padding: 10px 14px;
+      color: #fff;
+      font-family: var(--font-family);
+      font-size: 14px;
+      transition: var(--transition-smooth);
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 10px rgba(139, 92, 246, 0.15);
+    }
+
+    /* Toggle Switch */
+    .switch-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: var(--border-radius-sm);
+      border: 1px solid var(--panel-border);
+      margin-bottom: 16px;
+    }
+
+    .switch-label {
+      font-size: 13px;
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 46px;
+      height: 24px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(255, 255, 255, 0.1);
+      transition: .3s;
+      border-radius: 24px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+
+    input:checked+.slider {
+      background: var(--primary-gradient);
+    }
+
+    input:focus+.slider {
+      box-shadow: 0 0 1px #2196F3;
+    }
+
+    input:checked+.slider:before {
+      transform: translateX(22px);
+    }
+
+    /* Authorization Overlay screen */
+    .auth-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 14, 23, 0.95);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(12px);
+      transition: var(--transition-smooth);
+    }
+
+    .auth-card {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      padding: 32px;
+      border-radius: var(--border-radius-lg);
+      width: 100%;
+      max-width: 400px;
+      box-shadow: var(--glow-shadow);
+      text-align: center;
+    }
+
+    .auth-icon {
+      font-size: 40px;
+      background: var(--primary-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 16px;
+    }
+
+    /* Tabs for admin moderation list */
+    .filter-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 12px;
+    }
+
+    .filter-btn {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--panel-border);
+      color: var(--text-secondary);
+      font-size: 13px;
+      padding: 6px 16px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: var(--transition-smooth);
+      font-weight: 500;
+    }
+
+    .filter-btn:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .filter-btn.active {
+      background: var(--primary-gradient);
+      color: #fff;
+      border-color: transparent;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ADMIN AUTHENTICATION DIALOG (OVERLAY) -->
+  <div id="admin-auth-overlay" class="auth-overlay">
+    <div class="auth-card">
+      <i class="fa-solid fa-user-lock auth-icon"></i>
+      <h2 style="font-family: var(--font-display); font-weight:700; margin-bottom:6px;">Admin Access Required</h2>
+      <p style="font-size:14px; color: var(--text-secondary); margin-bottom:24px;">Please enter the administrator
+        password to manage the photo catalog.</p>
+
+      <form id="admin-login-form">
+        <div class="form-group">
+          <input type="password" id="admin-auth-password" class="form-input" placeholder="Enter password" required
+            autofocus>
+          <div id="auth-error-msg"
+            style="color:var(--danger); font-size:12px; text-align:left; margin-top:6px; font-weight:500; display:none;">
+            <i class="fa-solid fa-circle-exclamation"></i> Incorrect password. Please try again.
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">
+          <i class="fa-solid fa-unlock-keyhole"></i> Unlock Dashboard
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-icon">
+          <i class="fa-solid fa-unlock-keyhole"></i>
+        </div>
+        <div class="logo-text">
+          <h1>SUBHAJIT<span></span></h1>
+          <p></p>
+        </div>
+      </div>
+
+      <!-- Navigation -->
+      <nav class="app-nav">
+        <a href="index.html" style="text-decoration: none;">
+          <button class="nav-btn">
+            <i class="fa-solid fa-arrow-left"></i> Public Gallery
+          </button>
+        </a>
+        <button id="admin-logout-btn" class="nav-btn" style="color: var(--danger);">
+          <i class="fa-solid fa-power-off"></i> Logout
+        </button>
+      </nav>
+    </header>
+
+    <!-- Dashboard Content -->
+    <main class="app-main">
+      <div class="admin-grid">
+
+        <!-- Sidebar (Stats + Settings) -->
+        <div class="sidebar-column" style="display: flex; flex-direction: column; gap: 20px;">
+          <!-- Stats Panel -->
+          <div class="panel-card">
+            <div class="card-header">
+              <h2>Overview Statistics</h2>
+            </div>
+            <div class="stats-container">
+              <div class="stat-card">
+                <span class="stat-label">Total</span>
+                <div class="stat-val" id="stat-total">0</div>
+              </div>
+              <div class="stat-card stat-pending">
+                <span class="stat-label">Pending</span>
+                <div class="stat-val" id="stat-pending">0</div>
+              </div>
+              <div class="stat-card stat-approved">
+                <span class="stat-label">Approved</span>
+                <div class="stat-val" id="stat-approved">0</div>
+              </div>
+              <div class="stat-card stat-rejected">
+                <span class="stat-label">Rejected</span>
+                <div class="stat-val" id="stat-rejected">0</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Direct Upload Panel -->
+          <div class="panel-card">
+            <div class="card-header">
+              <h2>Direct Image Upload</h2>
+              <p>Upload photos directly to gallery</p>
+            </div>
+
+            <!-- Drag and Drop Zone -->
+            <div class="upload-zone" id="admin-upload-drag-zone"
+              style="min-height: 100px; padding: 16px; margin-bottom: 12px; cursor: pointer; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 2px dashed rgba(255,255,255,0.1); border-radius: var(--border-radius-md); transition: var(--transition-smooth);">
+              <input type="file" id="admin-file-input" multiple accept="image/*" class="file-input-hidden"
+                style="display:none;">
+              <div class="zone-prompt" style="text-align:center; padding: 0;">
+                <i class="fa-solid fa-cloud-arrow-up zone-icon"
+                  style="font-size: 24px; margin-bottom: 6px; background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent;"></i>
+                <p class="main-prompt" style="font-size: 13px; font-weight: 600; margin-bottom: 2px;">Drag & drop images
+                  here</p>
+                <p class="sub-prompt" style="font-size: 11px; color: var(--text-muted);">or click to browse</p>
+              </div>
+            </div>
+
+            <!-- Upload Settings -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <span style="font-size: 12px; color: var(--text-secondary); font-weight: 500;">Make Visible to
+                Public</span>
+              <label class="switch" style="transform: scale(0.85);">
+                <input type="checkbox" id="admin-upload-public-checkbox" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- Upload Queue / Preview for Admin -->
+            <div class="upload-queue-container hidden" id="admin-upload-queue-container" style="display:none; margin-top:16px;">
+              <h3 style="font-size:14px; margin-bottom:12px; color: var(--text-secondary); font-weight:600;">Selected Photos (<span id="admin-queue-count">0</span>)</h3>
+              <div class="preview-carousel" id="admin-preview-carousel" style="max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
+                <!-- Dynamic preview items go here -->
+              </div>
+              <div class="queue-actions">
+                <div class="queue-status-text" id="admin-queue-status-text" style="font-size:12px; color: var(--text-secondary); font-weight:500;">Ready</div>
+                <div class="progress-bar-container" style="height:6px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow:hidden;">
+                  <div class="progress-bar-fill" id="admin-upload-progress-fill" style="width: 0%; height:100%; background: var(--primary-gradient); transition: width 0.2s;"></div>
+                </div>
+                <div class="action-buttons" style="display:flex; gap:8px;">
+                  <button class="btn btn-secondary btn-sm" id="admin-clear-queue-btn" style="flex:1;">
+                    <i class="fa-solid fa-trash-can"></i> Clear
+                  </button>
+                  <button class="btn btn-primary btn-sm" id="admin-start-upload-btn" style="flex:1.5;">
+                    <i class="fa-solid fa-arrow-up-from-bracket"></i> Upload to Gallery
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Google Drive Cloud Storage Panel -->
+          <div class="panel-card" style="margin-bottom: 20px;">
+            <div class="card-header">
+              <h2>Google Drive Storage</h2>
+              <p>Store uploaded photos securely in your personal cloud</p>
+            </div>
+            
+            <!-- Connection Status -->
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding: 10px 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: var(--border-radius-sm);">
+              <span style="font-size:12px; color:var(--text-secondary); font-weight:500;">Connection Status</span>
+              <span id="gdrive-status-badge" class="badge badge-pending" style="font-size:11px; padding: 3px 8px; border-radius: 10px; font-weight: 600;">Checking...</span>
+            </div>
+
+            <!-- Disconnect Container -->
+            <div id="gdrive-connected-container" style="display:none;">
+              <div style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; display:flex; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                <i class="fa-solid fa-circle-check" style="color:var(--success)"></i> Account: 
+                <span id="gdrive-email" style="font-weight:600; color:#fff;">email@gmail.com</span>
+              </div>
+              
+              <!-- Warning container for missing scope -->
+              <div id="gdrive-warning-container" style="display:none; margin-bottom:12px; padding:10px 12px; background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.25); border-radius: var(--border-radius-sm); color:#f87171; font-size:11px; line-height:1.4;">
+                <i class="fa-solid fa-circle-exclamation" style="margin-right:4px;"></i> <strong>Insufficient Permissions:</strong> 
+                The connected Google account lacks Google Drive file creation access. Please disconnect and reconnect, making sure to check the Google Drive file access permission during login.
+              </div>
+
+              <button type="button" id="gdrive-disconnect-btn" class="btn btn-secondary btn-block btn-sm" style="background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.15); color: #f87171;">
+                <i class="fa-solid fa-link-slash"></i> Disconnect Google Drive
+              </button>
+            </div>
+
+            <!-- Credentials Input & Authorization Container -->
+            <div id="gdrive-setup-container" style="display:none;">
+              <div class="form-group">
+                <label class="form-label" for="gdrive-client-id">Google Client ID</label>
+                <input type="text" id="gdrive-client-id" class="form-input" placeholder="Enter Google OAuth Client ID" style="font-size:12px;">
+              </div>
+              <div class="form-group" style="margin-top:8px;">
+                <label class="form-label" for="gdrive-client-secret">Google Client Secret</label>
+                <input type="password" id="gdrive-client-secret" class="form-input" placeholder="Enter Google OAuth Client Secret" style="font-size:12px;">
+              </div>
+              
+              <div style="display:flex; gap:8px; margin-top:12px;">
+                <button type="button" id="gdrive-save-creds-btn" class="btn btn-secondary btn-sm" style="flex:1; padding: 6px 8px; font-size:12px;">
+                  <i class="fa-solid fa-floppy-disk"></i> Save Keys
+                </button>
+                <button type="button" id="gdrive-connect-btn" class="btn btn-primary btn-sm" style="flex:1.2; padding: 6px 8px; font-size:12px;">
+                  <i class="fa-brands fa-google-drive"></i> Connect Gmail
+                </button>
+              </div>
+              
+              <span style="font-size:10px; color:var(--text-muted); margin-top:8px; display:block; line-height: 1.4;">
+                <i class="fa-solid fa-info-circle"></i> Requires a Web application client created in Google Cloud with Redirect URI <code>http://localhost:3000/api/google/callback</code>
+              </span>
+            </div>
+          </div>
+
+          <!-- Configuration Panel -->
+          <div class="panel-card">
+            <div class="card-header">
+              <h2>Global Configurations</h2>
+              <p>Configure visibility settings & credentials</p>
+            </div>
+
+            <!-- Public Gallery catalog Toggle -->
+            <div class="switch-container">
+              <div>
+                <span class="switch-label">Public Gallery Browse</span>
+                <p style="font-size:11px; color: var(--text-muted); margin-top:2px;">Allow anyone to view approved
+                  public photos</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="toggle-public-gallery-switch" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- Adjust Logo Section -->
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.05); margin: 20px 0 16px 0;">
+            <h3 style="font-size:14px; font-family:var(--font-display); margin-bottom:12px; color:#fff;">Customize Brand
+              Logo</h3>
+
+            <!-- Logo upload -->
+            <div class="form-group">
+              <label class="form-label">Upload Custom Logo (PNG)</label>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <input type="file" id="logo-file-input" accept="image/png" style="display:none;">
+                <button type="button" class="btn btn-secondary btn-sm"
+                  onclick="document.getElementById('logo-file-input').click()"
+                  style="padding: 6px 12px; font-size:12px; border-radius: var(--border-radius-sm); border: 1px solid var(--panel-border); background:rgba(255,255,255,0.02); color:#fff; cursor:pointer;">
+                  <i class="fa-solid fa-image"></i> Choose Logo
+                </button>
+                <span id="logo-file-name"
+                  style="font-size:11px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;">No
+                  file chosen</span>
+              </div>
+            </div>
+
+            <!-- Logo display width slider -->
+            <div class="form-group" style="margin-top: 14px;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                <label class="form-label" style="margin-bottom:0;">Logo Display Width</label>
+                <span id="logo-width-val" style="font-size:12px; font-weight:600; color:var(--primary);">245px</span>
+              </div>
+              <input type="range" id="logo-width-slider" min="120" max="380" step="5" value="245"
+                style="width:100%; cursor:pointer;">
+            </div>
+
+            <!-- Change Admin Password -->
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.05); margin: 20px 0 16px 0;">
+            <h3 style="font-size:14px; font-family:var(--font-display); margin-bottom:12px; color:#fff;">Change Admin
+              Password</h3>
+
+            <form id="change-password-form">
+              <div class="form-group">
+                <label class="form-label" for="new-admin-password">New Password</label>
+                <input type="password" id="new-admin-password" class="form-input" placeholder="Min 6 characters"
+                  required>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="confirm-admin-password">Confirm Password</label>
+                <input type="password" id="confirm-admin-password" class="form-input" placeholder="Repeat new password"
+                  required>
+              </div>
+              <button type="submit" class="btn btn-secondary btn-block btn-sm" style="margin-top: 8px;">
+                <i class="fa-solid fa-key"></i> Update Password
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Moderation List Panel -->
+        <div class="main-panel">
+          <div class="panel-card gallery-card" style="padding-bottom: 24px;">
+            <div class="gallery-header" style="margin-bottom: 12px;">
+              <div>
+                <h2>Photo Moderation Queue</h2>
+                <p>Approve/reject uploads and control visibility</p>
+              </div>
+              <div class="gallery-controls">
+                <button class="btn-icon" id="refresh-moderation-btn" title="Refresh Moderation Queue">
+                  <i class="fa-solid fa-rotate-right"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Filtering tab buttons -->
+            <div class="filter-tabs" style="margin-bottom: 8px;">
+              <button class="filter-btn active" data-filter="all">All Photos</button>
+              <button class="filter-btn" data-filter="pending">Pending <span id="badge-pending-count"
+                  style="display:none; background: var(--warning); color:#000; padding:1px 6px; border-radius:10px; font-size:10px; font-weight:700;">0</span></button>
+              <button class="filter-btn" data-filter="approved">Approved</button>
+              <button class="filter-btn" data-filter="rejected">Rejected</button>
+            </div>
+
+            <!-- Bulk actions row -->
+            <div class="bulk-actions-bar" id="bulk-actions-wrapper"
+              style="display: flex; gap: 8px; margin-bottom: 16px; background: rgba(255,255,255,0.01); border: 1px solid var(--panel-border); padding: 8px 12px; border-radius: var(--border-radius-sm); align-items:center;">
+              <span
+                style="font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; font-weight:500;">
+                <i class="fa-solid fa-list-check" style="color: var(--primary);"></i> Bulk Pending Actions:
+              </span>
+              <button id="bulk-approve-btn" class="btn btn-success btn-sm btn-row"
+                style="padding: 4px 10px; font-size:12px; cursor:pointer;">
+                <i class="fa-solid fa-check-double"></i> Approve All
+              </button>
+              <button id="bulk-reject-btn" class="btn btn-warning btn-sm btn-row"
+                style="padding: 4px 10px; font-size:12px; cursor:pointer;">
+                <i class="fa-solid fa-xmark"></i> Reject All
+              </button>
+              <div style="flex-grow: 1;"></div>
+              <button id="bulk-delete-all-btn" class="btn btn-danger btn-sm btn-row"
+                style="padding: 4px 10px; font-size:12px; cursor:pointer; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171;">
+                <i class="fa-solid fa-trash-can"></i> Delete All Photos
+              </button>
+            </div>
+
+            <!-- Empty State -->
+            <div class="empty-gallery-state hidden" id="admin-empty-state">
+              <i class="fa-solid fa-check-double empty-icon" style="color:var(--success)"></i>
+              <h3>All Caught Up!</h3>
+              <p id="admin-empty-state-text">No photos match the selected filter category.</p>
+            </div>
+
+            <!-- Table content -->
+            <div class="table-container" id="admin-table-wrapper">
+              <table class="mod-table">
+                <thead>
+                  <tr>
+                    <th>Photo</th>
+                    <th>Original Name</th>
+                    <th>Date Uploaded</th>
+                    <th>Faces</th>
+                    <th>Status</th>
+                    <th>Visibility</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="moderation-table-body">
+                  <!-- Generated dynamically via JS -->
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer-bar">
+      <p>&copy; 2026 FaceMatch AI Admin Panel. All actions require valid administrator authorization credentials.</p>
+    </footer>
+  </div>
+
+  <!-- Image Details Lightbox Modal -->
+  <div id="lightbox-modal" class="lightbox-modal">
+    <span class="lightbox-close" id="lightbox-close-btn">&times;</span>
+    <div class="lightbox-content-wrapper">
+      <div class="lightbox-image-container">
+        <img id="lightbox-img" src="" alt="Full view">
+        <canvas id="lightbox-canvas" class="lightbox-canvas-overlay"></canvas>
+      </div>
+      <div class="lightbox-sidebar">
+        <h3>Moderation View</h3>
+        <div class="detail-item">
+          <span class="detail-label">Filename</span>
+          <span class="detail-value" id="detail-filename">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Uploaded At</span>
+          <span class="detail-value" id="detail-date">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Detected Faces</span>
+          <span class="detail-value" id="detail-faces">-</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Moderation Status</span>
+          <span class="detail-value" id="detail-status">-</span>
+        </div>
+
+        <div class="lightbox-actions" style="margin-top: 24px; display:flex; flex-direction:column; gap:10px;">
+          <a id="lightbox-download-link" href="" download class="btn btn-primary btn-block text-center">
+            <i class="fa-solid fa-download"></i> Download Image
+          </a>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <button id="lightbox-approve-btn" class="btn btn-success btn-block" style="padding: 10px 0;">
+              <i class="fa-solid fa-check"></i> Approve
+            </button>
+            <button id="lightbox-reject-btn" class="btn btn-warning btn-block" style="padding: 10px 0;">
+              <i class="fa-solid fa-xmark"></i> Reject
+            </button>
+          </div>
+          <button id="lightbox-delete-btn" class="btn btn-danger btn-block">
+            <i class="fa-solid fa-trash-can"></i> Delete Permanently
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/admin.js"></script>
+</body>
+
+</html>

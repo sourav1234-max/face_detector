@@ -14,53 +14,34 @@ window.faceApiLoaded = false;
 const LOCAL_MODEL_PATH = '/models';
 const CDN_MODEL_PATH = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 let modelPath = LOCAL_MODEL_PATH;
+// Limits to protect browser memory
+const MAX_UPLOAD_SIZE = 30 * 1024 * 1024; // 30 MB per file
+const MAX_UPLOAD_QUEUE = 20; // max files in client-side queue
+const MAX_ZIP_DOWNLOAD = 20; // max images to bundle client-side
+// Gallery refresh settings
+const GALLERY_POLL_INTERVAL = 30 * 1000; // 30 seconds
+let galleryRefreshTimer = null;
+// Gallery pagination to avoid rendering too many images at once
+const GALLERY_PAGE_SIZE = 100; // images per page
+let currentGalleryPage = 0;
+
+function getPhotoUrl(filename) {
+  if (!filename) return '';
+  return filename.startsWith('drive:')
+    ? `/api/drive/photo/${filename.split(':')[1]}`
+    : `/uploads/${filename}`;
+}
 
 // --- Initialize and Load Models ---
 async function initFaceApi() {
-  const progressFill = document.getElementById('loader-progress');
-  const statusText = document.getElementById('loader-status');
-
-  try {
-    // 1. Loading Face Detection Model
-    statusText.innerText = "Loading Face Detection Model (SSD MobileNet)...";
-    progressFill.style.width = "20%";
-    try {
-      await faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath);
-    } catch (e) {
-      console.warn("Failed to load models locally, trying CDN...", e);
-      modelPath = CDN_MODEL_PATH;
-      await faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath);
-    }
-
-    // 2. Loading Face Landmarks Model
-    statusText.innerText = "Loading Face Landmark Model (68 Points)...";
-    progressFill.style.width = "50%";
-    await faceapi.nets.faceLandmark68Net.loadFromUri(modelPath);
-
-    // 3. Loading Face Recognition Model
-    statusText.innerText = "Loading Face Recognition Model (Descriptors)...";
-    progressFill.style.width = "80%";
-    await faceapi.nets.faceRecognitionNet.loadFromUri(modelPath);
-
-    // Done
-    statusText.innerText = "Engine Ready!";
-    progressFill.style.width = "100%";
-    window.faceApiLoaded = true;
-
-    // Fade out loader overlay
-    setTimeout(() => {
-      const loader = document.getElementById('models-loader');
-      loader.style.opacity = '0';
-      setTimeout(() => loader.classList.add('hidden'), 500);
-    }, 400);
-
-    // Fetch initial gallery files
-    await fetchGallery();
-
-  } catch (err) {
-    console.error("AI Model Initialization failed:", err);
-    statusText.innerHTML = `<span style="color: #ef4444">Failed to load models. Make sure Node server is running and models are installed.</span>`;
+  window.faceApiLoaded = true;
+  const loader = document.getElementById('models-loader');
+  if (loader) {
+    loader.style.opacity = '0';
+    setTimeout(() => loader.classList.add('hidden'), 500);
   }
+  // Fetch initial gallery files
+  await fetchGallery();
 }
 
 // --- API Interactions ---
@@ -72,6 +53,18 @@ async function fetchGallery() {
     const result = await response.json();
     if (result.success) {
       window.galleryCatalog = result.photos;
+      window.publicGalleryEnabled = result.publicGalleryEnabled !== false;
+      // reset pagination when gallery refreshes
+      currentGalleryPage = 0;
+      
+      // Apply custom logo width if returned
+      if (result.logoWidth) {
+        const logoImg = document.querySelector('.logo-area img');
+        if (logoImg) {
+          logoImg.style.width = result.logoWidth + 'px';
+        }
+      }
+      
       updateGalleryUI();
     }
   } catch (err) {
@@ -80,11 +73,9 @@ async function fetchGallery() {
 }
 
 // Upload photo with metadata
-async function uploadPhoto(file, faceData) {
+async function uploadPhoto(file) {
   const formData = new FormData();
   formData.append('photo', file);
-  // Send face bounding boxes and descriptors
-  formData.append('descriptors', JSON.stringify(faceData));
 
   try {
     const response = await fetch('/api/upload', {
@@ -155,6 +146,30 @@ document.addEventListener('DOMContentLoaded', () => {
   setupUploadTabEvents();
   setupSearchTabEvents();
   setupLightboxEvents();
+  // Start automatic gallery refresh so the gallery catalog stays dynamic
+  startGalleryAutoRefresh();
+});
+
+// Start/stop gallery auto-refresh to keep gallery dynamic while leaving rest of page static
+function startGalleryAutoRefresh() {
+  // Immediately fetch once
+  fetchGallery();
+  if (galleryRefreshTimer) clearInterval(galleryRefreshTimer);
+  galleryRefreshTimer = setInterval(() => {
+    fetchGallery();
+  }, GALLERY_POLL_INTERVAL);
+}
+
+function stopGalleryAutoRefresh() {
+  if (galleryRefreshTimer) {
+    clearInterval(galleryRefreshTimer);
+    galleryRefreshTimer = null;
+  }
+}
+
+// Pause refresh when the page is hidden to save resources
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopGalleryAutoRefresh(); else startGalleryAutoRefresh();
 });
 
 // --- Tab 1: Upload Logic ---
@@ -206,6 +221,18 @@ async function handleFilesAdded(fileList) {
 
   for (let i = 0; i < fileList.length; i++) {
     const file = fileList[i];
+    // Reject files bigger than the configured limit
+    if (file.size > MAX_UPLOAD_SIZE) {
+      alert(file.name + " is too large. Please select files up to 30 MB.");
+      continue;
+    }
+
+    // Prevent too many files queued client-side
+    if (window.uploadQueue.length >= MAX_UPLOAD_QUEUE) {
+      alert('Upload queue limit reached. Please upload existing files or reduce selection.');
+      break;
+    }
+
     // Avoid duplicates by name
     if (window.uploadQueue.some(item => item.file.name === file.name)) continue;
 
@@ -213,16 +240,13 @@ async function handleFilesAdded(fileList) {
     const queueItem = {
       id: queueId,
       file: file,
-      status: 'pending', // pending, analyzing, ready, uploading, done, failed
+      status: 'ready', // Immediately ready for upload
       faces: [],
       error: null
     };
 
     window.uploadQueue.push(queueItem);
     renderQueueItem(queueItem);
-
-    // Asynchronously trigger face analysis
-    analyzeQueueFile(queueItem);
   }
 
   updateQueueCount();
@@ -236,6 +260,7 @@ function renderQueueItem(item) {
 
   // Create Object URL for thumbnail preview
   const url = URL.createObjectURL(item.file);
+  item.objectUrl = url;
 
   itemEl.innerHTML = `
     <div class="preview-thumbnail-wrapper">
@@ -243,8 +268,8 @@ function renderQueueItem(item) {
     </div>
     <div class="preview-info">
       <div class="preview-name">${item.file.name}</div>
-      <div class="preview-status" id="${item.id}-status">
-        <i class="fa-solid fa-spinner fa-spin"></i> Initializing...
+      <div class="preview-status ready" id="${item.id}-status">
+        <i class="fa-solid fa-circle-check" style="color:#10b981"></i> Image loaded
       </div>
     </div>
     <button class="preview-remove-btn" onclick="removeQueueItem('${item.id}')">
@@ -257,45 +282,14 @@ function renderQueueItem(item) {
   carousel.scrollTop = carousel.scrollHeight;
 }
 
-// Analyze face descriptors on client side
-async function analyzeQueueFile(item) {
-  const statusEl = document.getElementById(`${item.id}-status`);
-  statusEl.className = 'preview-status processing';
-  statusEl.innerHTML = `<i class="fa-solid fa-brain fa-pulse"></i> Running AI Detection...`;
-
-  try {
-    const img = await faceapi.bufferToImage(item.file);
-    const detections = await faceapi.detectAllFaces(img)
-      .withFaceLandmarks()
-      .withFaceDescriptors();
-
-    item.status = 'ready';
-    item.faces = detections.map(det => ({
-      box: {
-        x: Math.round(det.detection.box.x),
-        y: Math.round(det.detection.box.y),
-        width: Math.round(det.detection.box.width),
-        height: Math.round(det.detection.box.height)
-      },
-      descriptor: Array.from(det.descriptor) // convert Float32Array to standard array for JSON
-    }));
-
-    statusEl.className = 'preview-status ready';
-    statusEl.innerHTML = `<i class="fa-solid fa-face-smile"></i> Detected ${item.faces.length} face(s)`;
-
-  } catch (err) {
-    console.error("Error analyzing image:", err);
-    item.status = 'failed';
-    item.error = err.message;
-    statusEl.className = 'preview-status failed';
-    statusEl.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i> Analysis failed`;
-  }
-}
-
 // Remove single queue item
 window.removeQueueItem = function(id) {
   const idx = window.uploadQueue.findIndex(item => item.id === id);
   if (idx > -1) {
+    const item = window.uploadQueue[idx];
+    if (item.objectUrl) {
+      URL.revokeObjectURL(item.objectUrl);
+    }
     window.uploadQueue.splice(idx, 1);
     const el = document.getElementById(id);
     if (el) el.remove();
@@ -314,6 +308,11 @@ function updateQueueCount() {
 }
 
 function clearQueue() {
+  window.uploadQueue.forEach(item => {
+    if (item.objectUrl) {
+      URL.revokeObjectURL(item.objectUrl);
+    }
+  });
   window.uploadQueue = [];
   document.getElementById('preview-carousel').innerHTML = '';
   updateQueueCount();
@@ -329,7 +328,7 @@ async function startBatchUpload() {
   // Filter items that are ready
   const uploadable = window.uploadQueue.filter(item => item.status === 'ready');
   if (uploadable.length === 0) {
-    alert("No analyzed photos are ready for upload yet. Please wait for face detection to finish.");
+    alert("No photos in queue ready for upload.");
     return;
   }
 
@@ -348,18 +347,21 @@ async function startBatchUpload() {
 
     statusText.innerText = `Uploading image ${i + 1}/${uploadable.length}...`;
 
-    const res = await uploadPhoto(item.file, item.faces);
+    const res = await uploadPhoto(item.file);
     
     if (res.success) {
       successCount++;
       item.status = 'done';
       statusEl.className = 'preview-status ready';
-      statusEl.innerHTML = `<i class="fa-solid fa-check"></i> Uploaded`;
+      statusEl.innerHTML = `<i class="fa-solid fa-clock"></i> Uploaded (Pending)`;
       
       // Animate single removal from list
       setTimeout(() => {
         const el = document.getElementById(item.id);
         if (el) el.remove();
+        if (item.objectUrl) {
+          URL.revokeObjectURL(item.objectUrl);
+        }
         // Remove from memory queue
         window.uploadQueue = window.uploadQueue.filter(q => q.id !== item.id);
         updateQueueCount();
@@ -398,7 +400,45 @@ function updateGalleryUI() {
   totalCountEl.innerText = window.galleryCatalog.length;
   grid.innerHTML = '';
 
+  if (window.publicGalleryEnabled === false) {
+    emptyState.classList.remove('hidden');
+    grid.classList.add('hidden');
+    emptyState.innerHTML = `
+      <i class="fa-solid fa-lock empty-icon" style="color: var(--warning)"></i>
+      <h3>Public Gallery is Private</h3>
+      <p>The administrator has disabled public browsing. Please use the <strong>"Find My Photos"</strong> tab to securely retrieve your photos using face search.</p>
+    `;
+    return;
+  }
+
   if (window.galleryCatalog.length === 0) {
+    emptyState.classList.remove('hidden');
+    grid.classList.add('hidden');
+    emptyState.innerHTML = `
+      <i class="fa-regular fa-image empty-icon"></i>
+      <h3>No Photos in Gallery</h3>
+      <p>Upload photos using the panel on the left to start building your gallery catalog.</p>
+    `;
+    return;
+  }
+
+  emptyState.classList.add('hidden');
+  grid.classList.remove('hidden');
+  // Render only a page of gallery items to limit memory usage
+  renderGalleryPage();
+}
+
+// Render a page of gallery items and optionally append a Load More button
+function renderGalleryPage() {
+  const grid = document.getElementById('gallery-grid');
+  const emptyState = document.getElementById('empty-gallery-state');
+
+  const start = 0;
+  const end = Math.min(window.galleryCatalog.length, GALLERY_PAGE_SIZE * (currentGalleryPage + 1));
+
+  grid.innerHTML = '';
+
+  if (end === 0) {
     emptyState.classList.remove('hidden');
     grid.classList.add('hidden');
     return;
@@ -407,7 +447,8 @@ function updateGalleryUI() {
   emptyState.classList.add('hidden');
   grid.classList.remove('hidden');
 
-  window.galleryCatalog.forEach(photo => {
+  for (let i = start; i < end; i++) {
+    const photo = window.galleryCatalog[i];
     const itemEl = document.createElement('div');
     itemEl.className = 'gallery-item';
     itemEl.addEventListener('click', () => openLightbox(photo));
@@ -425,7 +466,7 @@ function updateGalleryUI() {
     itemEl.innerHTML = `
       ${badgeHtml}
       <div class="gallery-image-wrapper">
-        <img src="/uploads/${photo.filename}" class="gallery-image" alt="Gallery photo" loading="lazy">
+        <img src="${getPhotoUrl(photo.filename)}" class="gallery-image" alt="Gallery photo" loading="lazy">
         <div class="gallery-item-overlay">
           <div class="gallery-item-info">
             <p class="gallery-item-name">${photo.originalName}</p>
@@ -436,7 +477,25 @@ function updateGalleryUI() {
     `;
 
     grid.appendChild(itemEl);
-  });
+  }
+
+  // Add Load More button if there are more items
+  const moreContainerId = 'gallery-load-more-container';
+  let moreContainer = document.getElementById(moreContainerId);
+  if (moreContainer) moreContainer.remove();
+
+  if (end < window.galleryCatalog.length) {
+    moreContainer = document.createElement('div');
+    moreContainer.id = moreContainerId;
+    moreContainer.style.textAlign = 'center';
+    moreContainer.style.margin = '16px 0';
+    moreContainer.innerHTML = `<button id="gallery-load-more-btn" class="btn btn-secondary">Load more</button>`;
+    grid.parentNode.appendChild(moreContainer);
+    document.getElementById('gallery-load-more-btn').addEventListener('click', () => {
+      currentGalleryPage++;
+      renderGalleryPage();
+    });
+  }
 }
 
 // --- Tab 2: Face Search & Webcam Logic ---
@@ -514,15 +573,15 @@ function setupSearchTabEvents() {
     
     sliderValText.innerText = `${desc} (${val.toFixed(2)})`;
     
-    // Automatically re-run search if a query descriptor is loaded
-    if (window.queryDescriptor) {
+    // Automatically re-run search if a query image is loaded
+    if (window.searchQueryImage) {
       performSearch();
     }
   });
 
   // Run Search
   searchBtn.addEventListener('click', () => {
-    if (window.queryDescriptor) {
+    if (window.searchQueryImage) {
       performSearch();
     }
   });
@@ -546,52 +605,42 @@ async function handleSearchFileSelected(file) {
   const searchBtn = document.getElementById('execute-search-btn');
 
   // Reset
-  window.queryDescriptor = null;
-  searchBtn.classList.add('disabled');
+  window.searchQueryImage = file;
+  searchBtn.classList.remove('disabled');
 
   prompt.classList.add('hidden');
   previewContainer.classList.remove('hidden');
   feedbackCard.classList.remove('hidden');
 
-  feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing Face...`;
-  feedbackDesc.innerText = "Analyzing portrait, extracting features...";
+  feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Photo Loaded`;
+  feedbackDesc.innerText = "Click 'Search Gallery' to find matches.";
 
   try {
-    const img = await faceapi.bufferToImage(file);
-    
     // Render on canvas
-    const ctx = canvas.getContext('2d');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    ctx.drawImage(img, 0, 0);
-
-    // Detect face
-    const detection = await faceapi.detectSingleFace(img)
-      .withFaceLandmarks()
-      .withFaceDescriptor();
-
-    if (!detection) {
-      feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color:#ef4444"></i> No Face Detected`;
-      feedbackDesc.innerText = "We couldn't identify a clear face in this photo. Please upload a clear, front-facing portrait.";
+    const img = new Image();
+    // Check file size for search image
+    if (file.size > MAX_UPLOAD_SIZE) {
+      alert('Search image is too large. Please use an image up to 30 MB.');
+      clearSearchFile();
       return;
     }
 
-    // Highlight face box on preview canvas
-    ctx.strokeStyle = '#3b82f6';
-    ctx.lineWidth = Math.max(4, Math.round(img.width / 150));
-    const box = detection.detection.box;
-    ctx.strokeRect(box.x, box.y, box.width, box.height);
+    const url = URL.createObjectURL(file);
+    // Keep a reference so we can revoke on clear
+    window.searchQueryObjectUrl = url;
 
-    window.queryDescriptor = Array.from(detection.descriptor);
-    searchBtn.classList.remove('disabled');
-
-    feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face Extracted Successfully`;
-    feedbackDesc.innerText = "1 face analyzed and loaded. Click 'Search Gallery' to find matches.";
-
+    img.onload = () => {
+      const ctx = canvas.getContext('2d');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      try { URL.revokeObjectURL(url); } catch (e) {}
+      // clear stored object url since it's revoked
+      window.searchQueryObjectUrl = null;
+    };
+    img.src = url;
   } catch (err) {
-    console.error("Error analyzing search image:", err);
-    feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Error`;
-    feedbackDesc.innerText = err.message;
+    console.error("Error displaying search image:", err);
   }
 }
 
@@ -601,7 +650,21 @@ function clearSearchFile() {
   document.getElementById('search-preview-container').classList.add('hidden');
   document.getElementById('search-feedback-card').classList.add('hidden');
   document.getElementById('execute-search-btn').classList.add('disabled');
-  window.queryDescriptor = null;
+  // Revoke any object URL used for preview
+  if (window.searchQueryObjectUrl) {
+    try { URL.revokeObjectURL(window.searchQueryObjectUrl); } catch (e) {}
+    window.searchQueryObjectUrl = null;
+  }
+  window.searchQueryImage = null;
+
+  // Clear preview canvas to free memory
+  const canvas = document.getElementById('search-preview-canvas');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    canvas.width = 0;
+    canvas.height = 0;
+  }
 }
 
 // --- Webcam Integration ---
@@ -621,8 +684,6 @@ async function startWebcam() {
     video.onloadedmetadata = () => {
       overlay.width = video.videoWidth;
       overlay.height = video.videoHeight;
-      // Start real-time face detection loop
-      drawWebcamDetectionsLoop();
     };
   } catch (err) {
     console.error("Webcam access failed:", err);
@@ -647,41 +708,6 @@ function stopWebcam() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
 }
 
-// Draw webcam face rectangles in real time
-async function drawWebcamDetectionsLoop() {
-  const video = document.getElementById('webcam-video');
-  const overlay = document.getElementById('webcam-overlay');
-  const ctx = overlay.getContext('2d');
-
-  if (!window.isWebcamActive) return;
-
-  try {
-    const detection = await faceapi.detectSingleFace(video);
-    
-    ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-    if (detection && window.isWebcamActive) {
-      const box = detection.box;
-      ctx.strokeStyle = '#8b5cf6';
-      ctx.lineWidth = 3;
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = '#8b5cf6';
-      // Draw neon rounded box
-      ctx.beginPath();
-      ctx.roundRect(box.x, box.y, box.width, box.height, 10);
-      ctx.stroke();
-      ctx.shadowBlur = 0; // reset
-    }
-  } catch (err) {
-    // Suppress console spam during shut down
-  }
-
-  // Next frame
-  if (window.isWebcamActive) {
-    requestAnimationFrame(drawWebcamDetectionsLoop);
-  }
-}
-
 // Capture photo and match
 async function captureCameraSearch() {
   const video = document.getElementById('webcam-video');
@@ -690,7 +716,7 @@ async function captureCameraSearch() {
   const feedbackDesc = document.getElementById('feedback-desc');
 
   feedbackCard.classList.remove('hidden');
-  feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Freezing Frame...`;
+  feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...`;
   feedbackDesc.innerText = "Analyzing portrait...";
 
   try {
@@ -719,29 +745,11 @@ async function captureCameraSearch() {
     canvas.height = tempCanvas.height;
     canvas.getContext('2d').drawImage(tempCanvas, 0, 0);
 
-    // Analyze face
-    const detection = await faceapi.detectSingleFace(tempCanvas)
-      .withFaceLandmarks()
-      .withFaceDescriptor();
-
-    if (!detection) {
-      feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color:#ef4444"></i> Face Detection Failed`;
-      feedbackDesc.innerText = "No face was recognized in the captured frame. Please try again with better lighting.";
-      window.queryDescriptor = null;
-      return;
-    }
-
-    // Highlight on preview canvas
-    const previewCtx = canvas.getContext('2d');
-    previewCtx.strokeStyle = '#3b82f6';
-    previewCtx.lineWidth = 4;
-    const box = detection.detection.box;
-    previewCtx.strokeRect(box.x, box.y, box.width, box.height);
-
-    window.queryDescriptor = Array.from(detection.descriptor);
+    const base64Data = tempCanvas.toDataURL('image/jpeg');
+    window.searchQueryImage = base64Data;
     
     feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Captured!`;
-    feedbackDesc.innerText = "Portrait successfully analyzed. Performing search...";
+    feedbackDesc.innerText = "Performing search...";
 
     // Instantly perform search!
     performSearch();
@@ -753,19 +761,8 @@ async function captureCameraSearch() {
   }
 }
 
-// --- Face Matching Algorithm ---
-function getEuclideanDistance(a, b) {
-  let sum = 0;
-  const len = a.length;
-  for (let i = 0; i < len; i++) {
-    const diff = a[i] - b[i];
-    sum += diff * diff;
-  }
-  return Math.sqrt(sum);
-}
-
-function performSearch() {
-  if (!window.queryDescriptor) return;
+async function performSearch() {
+  if (!window.searchQueryImage) return;
 
   const threshold = parseFloat(document.getElementById('threshold-slider').value);
   const resultsGrid = document.getElementById('search-grid');
@@ -773,103 +770,98 @@ function performSearch() {
   const summaryText = document.getElementById('search-results-summary');
   const downloadAllBtn = document.getElementById('download-all-matches-btn');
 
-  // Array to hold matched photos
-  const matches = [];
+  summaryText.innerText = "Searching gallery...";
 
-  // Iterate all photos in gallery catalog
-  window.galleryCatalog.forEach(photo => {
-    if (!photo.descriptors || photo.descriptors.length === 0) return;
-
-    let minDistance = 999;
-    
-    // Check match against every face in the gallery photo
-    photo.descriptors.forEach(faceData => {
-      // Check if descriptors is format {box, descriptor} or raw descriptor array
-      const descriptor = Array.isArray(faceData) ? faceData : faceData.descriptor;
-      
-      if (!descriptor) return;
-
-      const dist = getEuclideanDistance(window.queryDescriptor, descriptor);
-      if (dist < minDistance) {
-        minDistance = dist;
-      }
-    });
-
-    // If minDistance is within threshold, it's a match!
-    if (minDistance <= threshold) {
-      // Calculate a match confidence score
-      // A distance of 0 means 100% match. A distance equal to threshold is 0% relative matching, 
-      // or we can use a direct standard formula: Math.round((1 - minDistance) * 100)
-      const confidence = Math.max(0, Math.round((1 - minDistance) * 100));
-      matches.push({
-        photo: photo,
-        distance: minDistance,
-        confidence: confidence
-      });
+  try {
+    const formData = new FormData();
+    if (window.searchQueryImage instanceof File) {
+      formData.append('photo', window.searchQueryImage);
+    } else {
+      formData.append('photo', window.searchQueryImage);
     }
-  });
+    formData.append('threshold', threshold);
 
-  // Sort matches by confidence descending (distance ascending)
-  matches.sort((a, b) => a.distance - b.distance);
-
-  // Store active matches on window for ZIP downloads
-  window.activeSearchMatches = matches.map(m => m.photo);
-
-  // Render Grid
-  resultsGrid.innerHTML = '';
-
-  if (matches.length === 0) {
-    // Show empty state
-    emptyState.classList.remove('hidden');
-    resultsGrid.classList.add('hidden');
-    downloadAllBtn.classList.add('hidden');
-
-    document.getElementById('empty-search-title').innerText = "No Matches Found";
-    document.getElementById('empty-search-desc').innerText = `We couldn't find any photos matching this face. Try adjusting the match precision slider to 'Loose' or uploading a different portrait.`;
-    summaryText.innerText = "Found 0 matching photos";
-    return;
-  }
-
-  // Populate Grid
-  emptyState.classList.add('hidden');
-  resultsGrid.classList.remove('hidden');
-  downloadAllBtn.classList.remove('hidden');
-
-  summaryText.innerText = `Found ${matches.length} matching photo(s) in catalog`;
-
-  matches.forEach(match => {
-    const photo = match.photo;
-    const card = document.createElement('div');
-    card.className = 'gallery-item';
-    card.addEventListener('click', () => openLightbox(photo));
-
-    const dateStr = new Date(photo.timestamp).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric'
+    const response = await fetch('/api/search', {
+      method: 'POST',
+      body: formData
     });
+    
+    const result = await response.json();
+    if (!result.success) {
+      summaryText.innerText = "Search failed";
+      alert("Search failed: " + result.error);
+      return;
+    }
 
-    card.innerHTML = `
-      <div class="match-score-badge">
-        <i class="fa-solid fa-circle-check"></i> ${match.confidence}% match
-      </div>
-      <div class="gallery-image-wrapper">
-        <img src="/uploads/${photo.filename}" class="gallery-image" alt="Match">
-        <div class="gallery-item-overlay">
-          <div class="gallery-item-info">
-            <p class="gallery-item-name">${photo.originalName}</p>
-            <p class="gallery-item-date">${dateStr}</p>
+    const matches = result.matches || [];
+
+    // Store active matches on window for ZIP downloads
+    window.activeSearchMatches = matches.map(m => m.photo);
+
+    // Render Grid
+    resultsGrid.innerHTML = '';
+
+    if (matches.length === 0) {
+      // Show empty state
+      emptyState.classList.remove('hidden');
+      resultsGrid.classList.add('hidden');
+      downloadAllBtn.classList.add('hidden');
+
+      document.getElementById('empty-search-title').innerText = "No Matches Found";
+      document.getElementById('empty-search-desc').innerText = `We couldn't find any photos matching this face. Try adjusting the match precision slider to 'Loose' or uploading a different portrait.`;
+      summaryText.innerText = "Found 0 matching photos";
+      return;
+    }
+
+    // Populate Grid
+    emptyState.classList.add('hidden');
+    resultsGrid.classList.remove('hidden');
+    downloadAllBtn.classList.remove('hidden');
+
+    summaryText.innerText = `Found ${matches.length} matching photo(s)`;
+
+    matches.forEach(match => {
+      const photo = match.photo;
+      const card = document.createElement('div');
+      card.className = 'gallery-item';
+      card.addEventListener('click', () => openLightbox(photo));
+
+      const dateStr = new Date(photo.timestamp).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric'
+      });
+
+      card.innerHTML = `
+        <div class="match-score-badge">
+          <i class="fa-solid fa-circle-check"></i> ${match.confidence}% match
+        </div>
+        <div class="gallery-image-wrapper">
+          <img src="${getPhotoUrl(photo.filename)}" class="gallery-image" alt="Match">
+          <div class="gallery-item-overlay">
+            <div class="gallery-item-info">
+              <p class="gallery-item-name">${photo.originalName}</p>
+              <p class="gallery-item-date">${dateStr}</p>
+            </div>
           </div>
         </div>
-      </div>
-    `;
+      `;
 
-    resultsGrid.appendChild(card);
-  });
+      resultsGrid.appendChild(card);
+    });
+  } catch (err) {
+    console.error("Search API error:", err);
+    summaryText.innerText = "Error performing search";
+  }
 }
 
 // Download matches bundle as ZIP
 async function downloadAllMatchesZip() {
   if (!window.activeSearchMatches || window.activeSearchMatches.length === 0) return;
+
+  if (window.activeSearchMatches.length > MAX_ZIP_DOWNLOAD) {
+    alert('Too many images to download at once. Please narrow results or download fewer images.');
+    return;
+  }
 
   const zipBtn = document.getElementById('download-all-matches-btn');
   const originalHtml = zipBtn.innerHTML;
@@ -884,7 +876,7 @@ async function downloadAllMatchesZip() {
     // Fetch and add each image to zip
     for (let i = 0; i < window.activeSearchMatches.length; i++) {
       const photo = window.activeSearchMatches[i];
-      const imageUrl = `/uploads/${photo.filename}`;
+      const imageUrl = getPhotoUrl(photo.filename);
       
       const response = await fetch(imageUrl);
       const blob = await response.blob();
@@ -943,7 +935,7 @@ function openLightbox(photo) {
   const downloadLink = document.getElementById('lightbox-download-link');
   const deleteBtn = document.getElementById('lightbox-delete-btn');
 
-  img.src = `/uploads/${photo.filename}`;
+  img.src = getPhotoUrl(photo.filename);
   filename.innerText = photo.originalName;
   
   date.innerText = new Date(photo.timestamp).toLocaleString(undefined, {
@@ -957,10 +949,13 @@ function openLightbox(photo) {
   const facesCount = photo.descriptors ? photo.descriptors.length : 0;
   faces.innerText = `${facesCount} face(s) identified`;
 
-  downloadLink.href = `/uploads/${photo.filename}`;
+  downloadLink.href = getPhotoUrl(photo.filename);
   downloadLink.setAttribute('download', photo.originalName);
 
-  // Set up delete trigger
+  // Hide delete button for normal public users
+  deleteBtn.style.display = 'none';
+
+  // Set up delete trigger (kept just in case)
   deleteBtn.onclick = () => {
     if (confirm("Are you sure you want to delete this photo permanently? This action cannot be undone.")) {
       deletePhoto(photo.id);

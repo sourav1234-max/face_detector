@@ -1,0 +1,1226 @@
+// ==========================================================================
+// FaceMatch AI - Admin Dashboard Logic
+// ==========================================================================
+
+// Global state variables
+window.allPhotos = [];
+window.activeFilter = 'all';
+window.selectedPhotoForLightbox = null;
+// Admin-side limits to prevent memory issues
+const ADMIN_MAX_UPLOAD_SIZE = 30 * 1024 * 1024; // 30 MB
+const ADMIN_MAX_UPLOAD_QUEUE = 50; // max files admin can queue
+const ADMIN_MOD_TABLE_PAGE_SIZE = 12; // rows per moderation page (reduced to avoid memory spikes)
+let adminModCurrentPage = 0;
+
+// Photo URL Helper (handles local fallback vs. Google Drive proxy streams)
+function getPhotoUrl(filename) {
+  if (!filename) return '';
+  return filename.startsWith('drive:') 
+    ? `/api/drive/photo/${filename.split(':')[1]}` 
+    : `/uploads/${filename}`;
+}
+
+// --- Helper AJAX function with Auth Header ---
+async function adminFetch(url, options = {}) {
+  options.credentials = 'same-origin';
+  options.headers = {
+    ...options.headers
+  };
+
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (netErr) {
+    console.error("Network error during admin fetch:", netErr);
+    alert("Network error: Could not reach the Node server. Please verify it is running.");
+    throw netErr;
+  }
+
+  if (response.status === 401) {
+    showAuthOverlay(true);
+    showAuthError("Session expired or invalid admin password.");
+    throw new Error('Unauthorized');
+  } else if (!response.ok) {
+    const errRes = await response.json().catch(() => ({}));
+    const errMsg = errRes.error || `HTTP ${response.status} error`;
+    alert("Database / Server error: " + errMsg);
+    throw new Error(errMsg);
+  }
+
+  return response.json();
+}
+
+// --- Initialize Admin App ---
+document.addEventListener('DOMContentLoaded', () => {
+  setupAuthEvents();
+  setupTabFilters();
+  setupSettingsEvents();
+  setupLightboxEvents();
+  setupBulkActions();
+  setupDirectUpload();
+
+  document.getElementById('refresh-moderation-btn').addEventListener('click', loadDashboardData);
+  document.getElementById('admin-logout-btn').addEventListener('click', logoutAdmin);
+
+  // Check URL parameters for successful Google Drive OAuth connection
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('gdrive') === 'success') {
+    alert("Successfully authenticated with your Gmail account and connected to Google Drive!");
+    window.history.replaceState({}, document.title, window.location.pathname);
+  } else if (urlParams.get('gdrive') === 'missing_scope') {
+    alert("Warning: Google account connected, but Google Drive file creation access was NOT granted. Please disconnect and reconnect, making sure to check the Google Drive file access permission during Google login.");
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+
+  // Check if we are already logged in through a session cookie
+  checkExistingAdminSession();
+});
+
+// --- Authentication Flow ---
+function setupAuthEvents() {
+  const loginForm = document.getElementById('admin-login-form');
+  loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const passwordInput = document.getElementById('admin-auth-password');
+    const passwordVal = passwordInput.value;
+
+    document.getElementById('auth-error-msg').style.display = 'none';
+
+    await verifyPasswordAndLoad(passwordVal);
+  });
+}
+
+async function verifyPasswordAndLoad(password) {
+  try {
+    const response = await fetch('/api/admin/login', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ password })
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (response.ok && result.success) {
+      showAuthOverlay(false);
+      await loadDashboardData();
+    } else {
+      const errMsg = result.error || 'Incorrect password. Please try again.';
+      showAuthError(errMsg);
+    }
+  } catch (err) {
+    console.error("Login verification error:", err);
+    showAuthError('Failed to connect to server. Verify that Node and MySQL database are running.');
+  }
+}
+
+async function checkExistingAdminSession() {
+  try {
+    const response = await fetch('/api/admin/session-check', {
+      method: 'GET',
+      credentials: 'same-origin'
+    });
+
+    if (response.ok) {
+      showAuthOverlay(false);
+      await loadDashboardData();
+    } else {
+      showAuthOverlay(true);
+    }
+  } catch (err) {
+    console.error("Session check error:", err);
+    showAuthOverlay(true);
+  }
+}
+
+function showAuthOverlay(show) {
+  const overlay = document.getElementById('admin-auth-overlay');
+  if (overlay) {
+    overlay.style.display = show ? 'flex' : 'none';
+  }
+  if (show) {
+    const passInput = document.getElementById('admin-auth-password');
+    if (passInput) {
+      passInput.value = '';
+      passInput.focus();
+    }
+  }
+}
+
+function showAuthError(message) {
+  const errorEl = document.getElementById('auth-error-msg');
+  if (errorEl) {
+    errorEl.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i> ${message || 'Incorrect password. Please try again.'}`;
+    errorEl.style.display = 'block';
+  }
+  const passInput = document.getElementById('admin-auth-password');
+  if (passInput) {
+    passInput.value = '';
+    passInput.focus();
+  }
+}
+
+async function logoutAdmin() {
+  if (confirm("Are you sure you want to log out from the Admin Dashboard?")) {
+    try {
+      await fetch('/api/admin/logout', {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
+    window.location.href = '/index.html';
+  }
+}
+
+// --- Load Data & Stats ---
+async function loadDashboardData() {
+  try {
+    // 1. Fetch Global Settings
+    const settingsRes = await adminFetch('/api/admin/settings');
+    if (settingsRes.success) {
+      document.getElementById('toggle-public-gallery-switch').checked = settingsRes.settings.publicGalleryEnabled;
+
+      // Update logo width slider
+      const logoWidth = settingsRes.settings.logoWidth || 245;
+      const widthSlider = document.getElementById('logo-width-slider');
+      if (widthSlider) {
+        widthSlider.value = logoWidth;
+        document.getElementById('logo-width-val').innerText = logoWidth + 'px';
+      }
+      
+      // Update photo retention input
+      const retentionInput = document.getElementById('photo-retention-input');
+      if (retentionInput) {
+        retentionInput.value = settingsRes.settings.photoRetentionHours !== undefined ? settingsRes.settings.photoRetentionHours : 24;
+      }
+
+      // Update Google Drive controls & connection badges
+      const statusBadge = document.getElementById('gdrive-status-badge');
+      const connectedContainer = document.getElementById('gdrive-connected-container');
+      const warningContainer = document.getElementById('gdrive-warning-container');
+      const setupContainer = document.getElementById('gdrive-setup-container');
+      const emailSpan = document.getElementById('gdrive-email');
+      const clientIdInput = document.getElementById('gdrive-client-id');
+      const clientSecretInput = document.getElementById('gdrive-client-secret');
+
+      if (statusBadge) {
+        const isConnected = !!settingsRes.settings.googleRefreshToken;
+        
+        if (clientIdInput) clientIdInput.value = settingsRes.settings.googleClientId || '';
+        if (clientSecretInput) clientSecretInput.value = settingsRes.settings.googleClientSecret || '';
+
+        if (isConnected) {
+          statusBadge.className = 'badge badge-approved';
+          statusBadge.innerText = 'Connected';
+          if (connectedContainer) connectedContainer.style.display = 'block';
+          if (setupContainer) setupContainer.style.display = 'none';
+          if (emailSpan) emailSpan.innerText = settingsRes.settings.googleConnectedEmail || 'Connected';
+          
+          const hasDriveScope = settingsRes.settings.googleHasDriveScope !== false;
+          if (warningContainer) {
+            warningContainer.style.display = hasDriveScope ? 'none' : 'block';
+          }
+        } else {
+          statusBadge.className = 'badge badge-pending';
+          statusBadge.innerText = 'Not Connected';
+          if (connectedContainer) connectedContainer.style.display = 'none';
+          if (setupContainer) setupContainer.style.display = 'block';
+          if (warningContainer) warningContainer.style.display = 'none';
+        }
+      }
+    }
+
+    // 2. Fetch Photos
+    const photosRes = await adminFetch('/api/admin/gallery');
+    if (photosRes.success) {
+      window.allPhotos = photosRes.photos || [];
+      updateStatsAndRender();
+    }
+  } catch (err) {
+    console.error("Failed to load dashboard data:", err);
+  }
+}
+
+function updateStatsAndRender() {
+  const photos = window.allPhotos;
+
+  const totalCount = photos.length;
+  const pendingCount = photos.filter(p => p.status === 'pending').length;
+  const approvedCount = photos.filter(p => p.status === 'approved').length;
+  const rejectedCount = photos.filter(p => p.status === 'rejected').length;
+
+  // Render stats counters
+  document.getElementById('stat-total').innerText = totalCount;
+  document.getElementById('stat-pending').innerText = pendingCount;
+  document.getElementById('stat-approved').innerText = approvedCount;
+  document.getElementById('stat-rejected').innerText = rejectedCount;
+
+  // Render Tab Pending Badge count
+  const badgeEl = document.getElementById('badge-pending-count');
+  if (pendingCount > 0) {
+    badgeEl.innerText = pendingCount;
+    badgeEl.style.display = 'inline-block';
+  } else {
+    badgeEl.style.display = 'none';
+  }
+
+  renderModerationTable();
+}
+
+// --- Tab Filtering ---
+function setupTabFilters() {
+  const buttons = document.querySelectorAll('.filter-btn');
+  buttons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      buttons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      window.activeFilter = btn.getAttribute('data-filter');
+      renderModerationTable();
+    });
+  });
+}
+
+// --- Render Table Dynamic Rows ---
+function renderModerationTable() {
+  const tbody = document.getElementById('moderation-table-body');
+  const emptyState = document.getElementById('admin-empty-state');
+  const tableWrapper = document.getElementById('admin-table-wrapper');
+
+  tbody.innerHTML = '';
+
+  // Filter photos
+  let filtered = window.allPhotos;
+  if (window.activeFilter !== 'all') {
+    filtered = window.allPhotos.filter(photo => photo.status === window.activeFilter);
+  }
+
+  // Sort: pending first, then newest first
+  filtered.sort((a, b) => {
+    if (a.status === 'pending' && b.status !== 'pending') return -1;
+    if (a.status !== 'pending' && b.status === 'pending') return 1;
+    return new Date(b.timestamp) - new Date(a.timestamp);
+  });
+
+  if (filtered.length === 0) {
+    emptyState.classList.remove('hidden');
+    tableWrapper.classList.add('hidden');
+    document.getElementById('admin-empty-state-text').innerText = `No photos match the "${window.activeFilter}" filter category.`;
+    return;
+  }
+
+  emptyState.classList.add('hidden');
+  tableWrapper.classList.remove('hidden');
+
+  // Apply pagination for moderation table
+  const start = 0;
+  const end = Math.min(filtered.length, ADMIN_MOD_TABLE_PAGE_SIZE * (adminModCurrentPage + 1));
+  const paged = filtered.slice(start, end);
+
+  paged.forEach(photo => {
+    const tr = document.createElement('tr');
+    tr.id = `row-${photo.id}`;
+
+    const dateStr = new Date(photo.timestamp).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    const facesCount = photo.descriptors ? photo.descriptors.length : 0;
+
+    // Status Badge HTML
+    const statusBadge = `<span class="status-badge badge-${photo.status}">
+      <i class="fa-solid ${photo.status === 'approved' ? 'fa-circle-check' : photo.status === 'rejected' ? 'fa-circle-xmark' : 'fa-circle-dot'}"></i>
+      ${photo.status}
+    </span>`;
+
+    // Visibility Checkbox Switch (only enabled if status is approved)
+    const isApproved = photo.status === 'approved';
+    const isPublicChecked = photo.isPublic ? 'checked' : '';
+    const visibilityHtml = `
+      <label class="switch" style="opacity: ${isApproved ? 1 : 0.4}; cursor: ${isApproved ? 'pointer' : 'not-allowed'}">
+        <input type="checkbox" onchange="togglePhotoVisibility('${photo.id}', this.checked)" ${isPublicChecked} ${isApproved ? '' : 'disabled'}>
+        <span class="slider"></span>
+      </label>
+      <span style="font-size: 11px; margin-left: 6px; color: ${photo.isPublic && isApproved ? 'var(--success)' : 'var(--text-muted)'}">
+        ${photo.isPublic && isApproved ? 'Public' : 'Private'}
+      </span>
+    `;
+
+    // Action Buttons
+    let actionsHtml = `
+      <div class="btn-row">
+    `;
+
+    if (photo.status !== 'approved') {
+      actionsHtml += `
+        <button class="btn btn-success btn-sm" onclick="updatePhotoStatus('${photo.id}', 'approved')">
+          <i class="fa-solid fa-check"></i> Approve
+        </button>
+      `;
+    }
+
+    if (photo.status !== 'rejected') {
+      actionsHtml += `
+        <button class="btn btn-warning btn-sm" onclick="updatePhotoStatus('${photo.id}', 'rejected')">
+          <i class="fa-solid fa-xmark"></i> Reject
+        </button>
+      `;
+    }
+
+    actionsHtml += `
+        <button class="btn btn-danger btn-sm" onclick="deletePhotoPermanently('${photo.id}')" title="Delete Permanent">
+          <i class="fa-solid fa-trash-can"></i>
+        </button>
+      </div>
+    `;
+
+    tr.innerHTML = `
+        <td>
+          <img src="${getPhotoUrl(photo.filename)}" class="thumb-img" loading="lazy" alt="Thumbnail" onclick="openAdminLightbox('${photo.id}')">
+        </td>
+      <td style="font-weight: 500; font-size:13px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${photo.originalName}">
+        ${photo.originalName}
+      </td>
+      <td style="color: var(--text-secondary); font-size: 13px;">${dateStr}</td>
+      <td style="font-weight: 600;"><i class="fa-solid fa-user-tag" style="color: var(--primary);"></i> ${facesCount}</td>
+      <td>${statusBadge}</td>
+      <td>
+        <div style="display: flex; align-items: center;">
+          ${visibilityHtml}
+        </div>
+      </td>
+      <td>${actionsHtml}</td>
+    `;
+
+    tbody.appendChild(tr);
+  });
+
+  // Add Load More button for moderation table if needed
+  const loadMoreId = 'admin-mod-load-more';
+  let existing = document.getElementById(loadMoreId);
+  if (existing) existing.remove();
+  if (end < filtered.length) {
+    const footer = document.getElementById('admin-table-footer') || document.getElementById('admin-table-wrapper');
+    const btn = document.createElement('div');
+    btn.id = loadMoreId;
+    btn.style.textAlign = 'center';
+    btn.style.padding = '8px 0';
+    btn.innerHTML = `<button class="btn btn-secondary" id="admin-mod-load-more-btn">Load more</button>`;
+    footer.parentNode.insertBefore(btn, footer.nextSibling);
+    document.getElementById('admin-mod-load-more-btn').addEventListener('click', () => {
+      adminModCurrentPage++;
+      renderModerationTable();
+    });
+  }
+}
+
+// --- Action Functions ---
+window.updatePhotoStatus = async function (id, status) {
+  try {
+    const res = await adminFetch('/api/admin/update-status', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ id, status })
+    });
+
+    if (res.success) {
+      // Find and update local object
+      const photo = window.allPhotos.find(p => p.id === id);
+      if (photo) {
+        photo.status = status;
+        // When rejecting, also automatically make it private
+        if (status === 'rejected') {
+          photo.isPublic = false;
+        }
+      }
+      updateStatsAndRender();
+
+      // Update active lightbox if open
+      if (window.selectedPhotoForLightbox && window.selectedPhotoForLightbox.id === id) {
+        window.selectedPhotoForLightbox.status = status;
+        if (status === 'rejected') {
+          window.selectedPhotoForLightbox.isPublic = false;
+        }
+        updateLightboxDetails(window.selectedPhotoForLightbox);
+      }
+    } else {
+      alert("Error updating status: " + res.error);
+    }
+  } catch (err) {
+    console.error("Update photo status call failed:", err);
+  }
+};
+
+window.togglePhotoVisibility = async function (id, isPublic) {
+  try {
+    const res = await adminFetch('/api/admin/update-visibility', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ id, isPublic })
+    });
+
+    if (res.success) {
+      const photo = window.allPhotos.find(p => p.id === id);
+      if (photo) photo.isPublic = isPublic;
+      updateStatsAndRender();
+    } else {
+      alert("Error toggling visibility: " + res.error);
+      loadDashboardData(); // reload on error to revert checkbox state
+    }
+  } catch (err) {
+    console.error("Visibility toggle failed:", err);
+  }
+};
+
+window.deletePhotoPermanently = async function (id) {
+  if (!confirm("Are you sure you want to delete this photo permanently? This will remove the image file and delete all facial descriptors from the server. This action is irreversible.")) {
+    return;
+  }
+
+  try {
+    const res = await adminFetch('/api/delete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ id })
+    });
+
+    if (res.success) {
+      // Remove from memory list
+      window.allPhotos = window.allPhotos.filter(p => p.id !== id);
+      updateStatsAndRender();
+
+      // Close lightbox if we deleted the photo that is open
+      if (window.selectedPhotoForLightbox && window.selectedPhotoForLightbox.id === id) {
+        closeLightbox();
+      }
+    } else {
+      alert("Delete failed: " + res.error);
+    }
+  } catch (err) {
+    console.error("Delete photo call failed:", err);
+  }
+};
+
+// --- Settings Operations ---
+function setupSettingsEvents() {
+  const publicSwitch = document.getElementById('toggle-public-gallery-switch');
+  publicSwitch.addEventListener('change', async () => {
+    const enabled = publicSwitch.checked;
+    try {
+      const res = await adminFetch('/api/admin/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ publicGalleryEnabled: enabled })
+      });
+      if (!res.success) {
+        alert("Failed to save settings: " + res.error);
+        publicSwitch.checked = !enabled; // revert
+      }
+    } catch (err) {
+      publicSwitch.checked = !enabled; // revert
+    }
+  });
+
+  const passwordForm = document.getElementById('change-password-form');
+  passwordForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const newPass = document.getElementById('new-admin-password').value;
+    const confirmPass = document.getElementById('confirm-admin-password').value;
+
+    if (newPass.length < 6) {
+      alert("Password must be at least 6 characters long.");
+      return;
+    }
+
+    if (newPass !== confirmPass) {
+      alert("Passwords do not match. Please verify.");
+      return;
+    }
+
+    try {
+      const res = await adminFetch('/api/admin/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ newPassword: newPass })
+      });
+
+      if (res.success) {
+        alert("Admin password updated successfully! Please use the new password for future access.");
+        passwordForm.reset();
+      } else {
+        alert("Failed to update password: " + res.error);
+      }
+    } catch (err) {
+      console.error("Change password request error:", err);
+    }
+  });
+
+  const logoFileInput = document.getElementById('logo-file-input');
+  const logoFileName = document.getElementById('logo-file-name');
+  const logoPreviewImg = document.getElementById('logo-preview-img');
+
+  if (logoFileInput) {
+    logoFileInput.addEventListener('change', async (e) => {
+      if (e.target.files.length === 0) return;
+      const file = e.target.files[0];
+      logoFileName.innerText = file.name;
+
+      const formData = new FormData();
+      formData.append('logo', file);
+
+      try {
+        const response = await fetch('/api/admin/upload-logo', {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: formData
+        });
+        const res = await response.json();
+        if (res.success) {
+          alert("Custom logo uploaded successfully!");
+          if (logoPreviewImg) {
+            logoPreviewImg.src = res.logoUrl;
+          }
+        } else {
+          alert("Logo upload failed: " + res.error);
+        }
+      } catch (err) {
+        console.error("Logo upload failed:", err);
+        alert("Error uploading logo: " + err.message);
+      }
+    });
+  }
+
+  const logoWidthSlider = document.getElementById('logo-width-slider');
+  const logoWidthVal = document.getElementById('logo-width-val');
+
+  if (logoWidthSlider) {
+    logoWidthSlider.addEventListener('input', (e) => {
+      logoWidthVal.innerText = e.target.value + 'px';
+    });
+
+    logoWidthSlider.addEventListener('change', async (e) => {
+      const val = parseInt(e.target.value, 10);
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ logoWidth: val })
+        });
+        if (!res.success) {
+          alert("Failed to update logo width: " + res.error);
+        }
+      } catch (err) {
+        console.error("Failed to update logo width settings:", err);
+      }
+    });
+  }
+
+  const retentionInput = document.getElementById('photo-retention-input');
+  if (retentionInput) {
+    retentionInput.addEventListener('change', async (e) => {
+      const val = parseFloat(e.target.value);
+      if (isNaN(val) || val < 0) {
+        alert("Please enter a valid number of hours (0 or greater).");
+        return;
+      }
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ photoRetentionHours: val })
+        });
+        if (res.success) {
+          console.log("Photo retention period updated to " + val + " hours");
+        } else {
+          alert("Failed to update photo retention settings: " + res.error);
+        }
+      } catch (err) {
+        console.error("Failed to update photo retention settings:", err);
+      }
+    });
+  }
+
+  // Google Credentials Save Event
+  const saveCredsBtn = document.getElementById('gdrive-save-creds-btn');
+  if (saveCredsBtn) {
+    saveCredsBtn.addEventListener('click', async () => {
+      const clientId = document.getElementById('gdrive-client-id').value;
+      const clientSecret = document.getElementById('gdrive-client-secret').value;
+      
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            googleClientId: clientId,
+            googleClientSecret: clientSecret
+          })
+        });
+        if (res.success) {
+          alert("Google OAuth credentials saved successfully!");
+          await loadDashboardData();
+        } else {
+          alert("Failed to save credentials: " + res.error);
+        }
+      } catch (err) {
+        console.error("Save credentials error:", err);
+      }
+    });
+  }
+
+  // Google OAuth Authorization Redirect Connect Event
+  const gdriveConnectBtn = document.getElementById('gdrive-connect-btn');
+  if (gdriveConnectBtn) {
+    gdriveConnectBtn.addEventListener('click', () => {
+      const clientId = document.getElementById('gdrive-client-id').value;
+      const clientSecret = document.getElementById('gdrive-client-secret').value;
+      if (!clientId || !clientSecret) {
+        alert("Please enter both Google Client ID and Google Client Secret, and click 'Save Keys' before connecting.");
+        return;
+      }
+      window.location.href = '/api/google/auth';
+    });
+  }
+
+  // Google Disconnect Event
+  const gdriveDisconnectBtn = document.getElementById('gdrive-disconnect-btn');
+  if (gdriveDisconnectBtn) {
+    gdriveDisconnectBtn.addEventListener('click', async () => {
+      if (!confirm("Are you sure you want to disconnect Google Drive? Photos will fall back to local disk storage.")) {
+        return;
+      }
+      try {
+        const res = await adminFetch('/api/google/disconnect', {
+          method: 'POST'
+        });
+        if (res.success) {
+          alert("Google Drive disconnected successfully.");
+          await loadDashboardData();
+        } else {
+          alert("Disconnect failed: " + res.error);
+        }
+      } catch (err) {
+        console.error("Disconnect error:", err);
+      }
+    });
+  }
+}
+
+// --- Lightbox Integration ---
+function setupLightboxEvents() {
+  const modal = document.getElementById('lightbox-modal');
+  const closeBtn = document.getElementById('lightbox-close-btn');
+
+  closeBtn.addEventListener('click', closeLightbox);
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeLightbox();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.style.display === 'flex') closeLightbox();
+  });
+
+  // Set up lightbox moderation triggers
+  document.getElementById('lightbox-approve-btn').addEventListener('click', () => {
+    if (window.selectedPhotoForLightbox) {
+      updatePhotoStatus(window.selectedPhotoForLightbox.id, 'approved');
+    }
+  });
+
+  document.getElementById('lightbox-reject-btn').addEventListener('click', () => {
+    if (window.selectedPhotoForLightbox) {
+      updatePhotoStatus(window.selectedPhotoForLightbox.id, 'rejected');
+    }
+  });
+
+  document.getElementById('lightbox-delete-btn').addEventListener('click', () => {
+    if (window.selectedPhotoForLightbox) {
+      deletePhotoPermanently(window.selectedPhotoForLightbox.id);
+    }
+  });
+}
+
+function openAdminLightbox(photoId) {
+  const photo = window.allPhotos.find(p => p.id === photoId);
+  if (!photo) return;
+
+  window.selectedPhotoForLightbox = photo;
+
+  const modal = document.getElementById('lightbox-modal');
+  const img = document.getElementById('lightbox-img');
+  const canvas = document.getElementById('lightbox-canvas');
+  const downloadLink = document.getElementById('lightbox-download-link');
+
+  img.src = getPhotoUrl(photo.filename);
+  downloadLink.href = getPhotoUrl(photo.filename);
+  downloadLink.setAttribute('download', photo.originalName);
+
+  updateLightboxDetails(photo);
+
+  modal.style.display = 'flex';
+
+  img.onload = () => {
+    canvas.width = img.clientWidth;
+    canvas.height = img.clientHeight;
+
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (photo.descriptors && photo.descriptors.length > 0) {
+      const scaleX = img.clientWidth / img.naturalWidth;
+      const scaleY = img.clientHeight / img.naturalHeight;
+
+      ctx.strokeStyle = '#c084fc';
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = '#8b5cf6';
+
+      photo.descriptors.forEach(faceData => {
+        const box = faceData.box;
+        if (box) {
+          const x = box.x * scaleX;
+          const y = box.y * scaleY;
+          const width = box.width * scaleX;
+          const height = box.height * scaleY;
+
+          ctx.beginPath();
+          ctx.roundRect(x, y, width, height, 6);
+          ctx.stroke();
+        }
+      });
+      ctx.shadowBlur = 0;
+    }
+  };
+}
+
+function updateLightboxDetails(photo) {
+  document.getElementById('detail-filename').innerText = photo.originalName;
+  document.getElementById('detail-date').innerText = new Date(photo.timestamp).toLocaleString();
+
+  const facesCount = photo.descriptors ? photo.descriptors.length : 0;
+  document.getElementById('detail-faces').innerText = `${facesCount} face(s) identified`;
+
+  const statusEl = document.getElementById('detail-status');
+  statusEl.innerText = photo.status;
+  statusEl.className = `detail-value status-badge badge-${photo.status}`;
+
+  // Highlight buttons if status is active
+  const approveBtn = document.getElementById('lightbox-approve-btn');
+  const rejectBtn = document.getElementById('lightbox-reject-btn');
+
+  if (photo.status === 'approved') {
+    approveBtn.style.opacity = '0.5';
+    approveBtn.style.pointerEvents = 'none';
+    rejectBtn.style.opacity = '1';
+    rejectBtn.style.pointerEvents = 'auto';
+  } else if (photo.status === 'rejected') {
+    approveBtn.style.opacity = '1';
+    approveBtn.style.pointerEvents = 'auto';
+    rejectBtn.style.opacity = '0.5';
+    rejectBtn.style.pointerEvents = 'none';
+  } else {
+    approveBtn.style.opacity = '1';
+    approveBtn.style.pointerEvents = 'auto';
+    rejectBtn.style.opacity = '1';
+    rejectBtn.style.pointerEvents = 'auto';
+  }
+}
+
+function closeLightbox() {
+  const modal = document.getElementById('lightbox-modal');
+  modal.style.display = 'none';
+  document.getElementById('lightbox-img').src = '';
+  const canvas = document.getElementById('lightbox-canvas');
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  window.selectedPhotoForLightbox = null;
+}
+
+// --- Bulk Operations (Phase 2) ---
+function setupBulkActions() {
+  const bulkApproveBtn = document.getElementById('bulk-approve-btn');
+  const bulkRejectBtn = document.getElementById('bulk-reject-btn');
+
+  if (bulkApproveBtn) {
+    bulkApproveBtn.addEventListener('click', async () => {
+      const pendingPhotos = window.allPhotos.filter(p => p.status === 'pending');
+      if (pendingPhotos.length === 0) {
+        alert("No pending photos in the queue to approve.");
+        return;
+      }
+      if (confirm(`Are you sure you want to APPROVE all ${pendingPhotos.length} pending photo(s)?`)) {
+        try {
+          const res = await adminFetch('/api/admin/bulk-status', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ status: 'approved' })
+          });
+          if (res.success) {
+            alert(`Successfully approved ${res.updatedCount} photo(s).`);
+            await loadDashboardData();
+          } else {
+            alert("Error: " + res.error);
+          }
+        } catch (err) {
+          console.error("Bulk approve failed:", err);
+        }
+      }
+    });
+  }
+
+  if (bulkRejectBtn) {
+    bulkRejectBtn.addEventListener('click', async () => {
+      const pendingPhotos = window.allPhotos.filter(p => p.status === 'pending');
+      if (pendingPhotos.length === 0) {
+        alert("No pending photos in the queue to reject.");
+        return;
+      }
+      if (confirm(`Are you sure you want to REJECT all ${pendingPhotos.length} pending photo(s)?`)) {
+        try {
+          const res = await adminFetch('/api/admin/bulk-status', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ status: 'rejected' })
+          });
+          if (res.success) {
+            alert(`Successfully rejected ${res.updatedCount} photo(s).`);
+            await loadDashboardData();
+          } else {
+            alert("Error: " + res.error);
+          }
+        } catch (err) {
+          console.error("Bulk reject failed:", err);
+        }
+      }
+    });
+  }
+
+  const bulkDeleteAllBtn = document.getElementById('bulk-delete-all-btn');
+  if (bulkDeleteAllBtn) {
+    bulkDeleteAllBtn.addEventListener('click', async () => {
+      if (window.allPhotos.length === 0) {
+        alert("There are no photos in the gallery to delete.");
+        return;
+      }
+      
+      const confirmFirst = confirm(`WARNING: Are you sure you want to permanently delete ALL ${window.allPhotos.length} photo(s) from the server? This will delete all image files, Google Drive files, and facial descriptor data. This action is irreversible.`);
+      if (!confirmFirst) return;
+
+      const confirmSecond = confirm(`FINAL CONFIRMATION: Type 'DELETE ALL' in the next prompt if you are absolutely sure.`);
+      if (!confirmSecond) return;
+      
+      const typedConfirmation = prompt(`Please type 'DELETE ALL' to confirm deletion of all files:`);
+      if (typedConfirmation !== 'DELETE ALL') {
+        alert("Incorrect confirmation text. Deletion cancelled.");
+        return;
+      }
+
+      try {
+        const res = await adminFetch('/api/admin/delete-all', {
+          method: 'POST'
+        });
+        if (res.success) {
+          alert("All photos have been successfully deleted.");
+          await loadDashboardData();
+        } else {
+          alert("Error: " + res.error);
+        }
+      } catch (err) {
+        console.error("Bulk delete all failed:", err);
+      }
+    });
+  }
+}
+
+// --- Direct Upload (Phase 2) ---
+let faceApiLoaded = true;
+
+async function initFaceApiForAdmin() {
+  return true;
+}
+
+window.adminUploadQueue = [];
+
+function setupDirectUpload() {
+  const dragZone = document.getElementById('admin-upload-drag-zone');
+  const fileInput = document.getElementById('admin-file-input');
+  const startUploadBtn = document.getElementById('admin-start-upload-btn');
+  const clearQueueBtn = document.getElementById('admin-clear-queue-btn');
+
+  if (!dragZone || !fileInput) return;
+
+  dragZone.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+      handleAdminFilesAdded(e.target.files);
+    }
+  });
+
+  dragZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dragZone.style.borderColor = 'var(--primary)';
+    dragZone.style.background = 'rgba(139, 92, 246, 0.05)';
+  });
+
+  dragZone.addEventListener('dragleave', () => {
+    dragZone.style.borderColor = 'rgba(255,255,255,0.1)';
+    dragZone.style.background = 'transparent';
+  });
+
+  dragZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragZone.style.borderColor = 'rgba(255,255,255,0.1)';
+    dragZone.style.background = 'transparent';
+    if (e.dataTransfer.files.length > 0) {
+      handleAdminFilesAdded(e.dataTransfer.files);
+    }
+  });
+
+  if (startUploadBtn) {
+    startUploadBtn.addEventListener('click', startAdminBatchUpload);
+  }
+  if (clearQueueBtn) {
+    clearQueueBtn.addEventListener('click', clearAdminQueue);
+  }
+}
+
+async function handleAdminFilesAdded(fileList) {
+  const queueContainer = document.getElementById('admin-upload-queue-container');
+  if (queueContainer) {
+    queueContainer.style.display = 'block';
+    queueContainer.classList.remove('hidden');
+  }
+
+  const statusText = document.getElementById('admin-queue-status-text');
+  if (statusText) {
+    statusText.innerText = "Images loaded.";
+  }
+
+  for (let i = 0; i < fileList.length; i++) {
+    const file = fileList[i];
+    // Reject files bigger than limit
+    if (file.size > ADMIN_MAX_UPLOAD_SIZE) {
+      alert(file.name + " is too large. Please select files up to 30 MB.");
+      continue;
+    }
+
+    // Prevent too many files queued client-side
+    if (window.adminUploadQueue.length >= ADMIN_MAX_UPLOAD_QUEUE) {
+      alert('Admin upload queue limit reached. Please upload existing files or reduce selection.');
+      break;
+    }
+
+    // Avoid duplicates by name
+    if (window.adminUploadQueue.some(item => item.file.name === file.name)) continue;
+
+    const queueId = 'aqi_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+    const queueItem = {
+      id: queueId,
+      file: file,
+      status: 'ready', // Immediately ready for upload
+      faces: [],
+      error: null
+    };
+
+    window.adminUploadQueue.push(queueItem);
+    renderAdminQueueItem(queueItem);
+  }
+
+  updateAdminQueueCount();
+}
+
+function renderAdminQueueItem(item) {
+  const carousel = document.getElementById('admin-preview-carousel');
+  if (!carousel) return;
+  
+  const itemEl = document.createElement('div');
+  itemEl.className = 'preview-item';
+  itemEl.id = item.id;
+
+  const url = URL.createObjectURL(item.file);
+  item.objectUrl = url;
+
+  // Revoke object URL after image loads to free memory
+  const tempImg = new Image();
+  tempImg.onload = () => {
+    try { URL.revokeObjectURL(url); } catch (e) {}
+    // clear stored objectUrl reference (item removal will check)
+    item.objectUrl = null;
+  };
+  tempImg.src = url;
+
+  itemEl.innerHTML = `
+    <div class="preview-thumbnail-wrapper">
+      <img src="${url}" class="preview-thumbnail" alt="preview">
+    </div>
+    <div class="preview-info">
+      <div class="preview-name">${item.file.name}</div>
+      <div class="preview-status ready" id="${item.id}-status">
+        <i class="fa-solid fa-circle-check" style="color:#10b981"></i> Loaded
+      </div>
+    </div>
+    <button class="preview-remove-btn" onclick="removeAdminQueueItem('${item.id}')">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  `;
+
+  carousel.appendChild(itemEl);
+  carousel.scrollTop = carousel.scrollHeight;
+}
+
+window.removeAdminQueueItem = function(id) {
+  const idx = window.adminUploadQueue.findIndex(item => item.id === id);
+  if (idx > -1) {
+    const item = window.adminUploadQueue[idx];
+    if (item.objectUrl) {
+      URL.revokeObjectURL(item.objectUrl);
+    }
+    window.adminUploadQueue.splice(idx, 1);
+    const el = document.getElementById(id);
+    if (el) el.remove();
+    updateAdminQueueCount();
+  }
+};
+
+function updateAdminQueueCount() {
+  const countSpan = document.getElementById('admin-queue-count');
+  if (countSpan) {
+    countSpan.innerText = window.adminUploadQueue.length;
+  }
+
+  const container = document.getElementById('admin-upload-queue-container');
+  if (container && window.adminUploadQueue.length === 0) {
+    container.style.display = 'none';
+    container.classList.add('hidden');
+  }
+}
+
+function clearAdminQueue() {
+  window.adminUploadQueue.forEach(item => {
+    if (item.objectUrl) {
+      URL.revokeObjectURL(item.objectUrl);
+    }
+  });
+  window.adminUploadQueue = [];
+  const carousel = document.getElementById('admin-preview-carousel');
+  if (carousel) carousel.innerHTML = '';
+  updateAdminQueueCount();
+}
+
+async function startAdminBatchUpload() {
+  const startUploadBtn = document.getElementById('admin-start-upload-btn');
+  const clearQueueBtn = document.getElementById('admin-clear-queue-btn');
+  const progressBar = document.getElementById('admin-upload-progress-fill');
+  const statusText = document.getElementById('admin-queue-status-text');
+  const isPublicCheckbox = document.getElementById('admin-upload-public-checkbox');
+
+  const uploadable = window.adminUploadQueue.filter(item => item.status === 'ready');
+  if (uploadable.length === 0) {
+    alert("No photos in queue ready for upload.");
+    return;
+  }
+
+  if (startUploadBtn) startUploadBtn.classList.add('disabled');
+  if (clearQueueBtn) clearQueueBtn.classList.add('disabled');
+
+  let successCount = 0;
+  if (progressBar) progressBar.style.width = '0%';
+
+  const uploadPromises = uploadable.map(async (item, i) => {
+    item.status = 'uploading';
+    const statusEl = document.getElementById(`${item.id}-status`);
+    if (statusEl) {
+      statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading...`;
+    }
+
+    const formData = new FormData();
+    formData.append('photo', item.file);
+    formData.append('isPublic', isPublicCheckbox ? isPublicCheckbox.checked : true);
+
+    try {
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: formData
+      });
+      const result = await response.json();
+      if (result.success) {
+        successCount++;
+        item.status = 'done';
+        if (statusEl) {
+          statusEl.className = 'preview-status ready';
+          statusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> Uploaded`;
+        }
+        
+        setTimeout(() => {
+          const el = document.getElementById(item.id);
+          if (el) el.remove();
+          if (item.objectUrl) {
+            URL.revokeObjectURL(item.objectUrl);
+          }
+          window.adminUploadQueue = window.adminUploadQueue.filter(q => q.id !== item.id);
+          updateAdminQueueCount();
+        }, 1000);
+      } else {
+        item.status = 'failed';
+        if (statusEl) {
+          statusEl.className = 'preview-status failed';
+          statusEl.innerHTML = `<i class="fa-solid fa-xmark"></i> Server error`;
+        }
+      }
+    } catch (err) {
+      console.error("Upload failed:", err);
+      item.status = 'failed';
+      if (statusEl) {
+        statusEl.className = 'preview-status failed';
+        statusEl.innerHTML = `<i class="fa-solid fa-xmark"></i> Upload failed`;
+      }
+    }
+
+    const completedCount = uploadable.filter(q => q.status === 'done' || q.status === 'failed').length;
+    const pct = Math.round((completedCount / uploadable.length) * 100);
+    if (progressBar) progressBar.style.width = `${pct}%`;
+    if (statusText) statusText.innerText = `Uploading images (${completedCount}/${uploadable.length})...`;
+  });
+
+  await Promise.all(uploadPromises);
+
+  if (statusText) {
+    statusText.innerHTML = `<span style='color:var(--success)'><i class='fa-solid fa-circle-check'></i> Successfully uploaded ${successCount}/${uploadable.length} photos!</span>`;
+  }
+  if (progressBar) progressBar.style.width = '100%';
+
+  setTimeout(() => {
+    if (progressBar) progressBar.style.width = '0%';
+    if (startUploadBtn) startUploadBtn.classList.remove('disabled');
+    if (clearQueueBtn) clearQueueBtn.classList.remove('disabled');
+  }, 2000);
+
+  await loadDashboardData();
+}
