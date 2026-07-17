@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -176,7 +177,9 @@ function getGoogleOAuthClient() {
   if (!settings.googleClientId || !settings.googleClientSecret) {
     return null;
   }
-  const redirectUri = 'http://localhost:3000/api/google/callback';
+  const redirectUri =  process.env.NODE_ENV === 'production'
+    ? 'https://face-detector-wksm.onrender.com/api/google/callback'
+    : 'http://localhost:3000/api/google/callback';
   return new google.auth.OAuth2(
     settings.googleClientId,
     settings.googleClientSecret,
