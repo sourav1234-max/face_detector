@@ -7,7 +7,8 @@
     "setup": "node setup.js",
     "build": "node setup.js",
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "postinstall": "python -m pip install -r requirements.txt || python3 -m pip install -r requirements.txt || py -3 -m pip install -r requirements.txt"
   },
   "dependencies": {
     "@vladmandic/face-api": "^1.7.12",

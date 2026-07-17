@@ -438,7 +438,13 @@ function runPythonFaceDetection(filePath) {
             tryNextCommand(index + 1);
             return;
           }
-          reject(new Error(`Python process exited with code ${code}. Stderr: ${stderrData}`));
+
+          const dependencyMatch = stderrData.match(/ModuleNotFoundError:\s+No module named ['"](.+)['"]/i);
+          let errorMessage = `Python process exited with code ${code}. Stderr: ${stderrData}`;
+          if (dependencyMatch) {
+            errorMessage = `Missing Python module: ${dependencyMatch[1]}. Install dependencies with 'python -m pip install -r requirements.txt'.`;
+          }
+          reject(new Error(errorMessage));
           return;
         }
         try {
@@ -1099,9 +1105,18 @@ setInterval(runPhotoCleanup, 10 * 60 * 1000);
 runPhotoCleanup();
 
 // Start the server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`==================================================`);
   console.log(` Face Detection Gallery Server is running!`);
   console.log(` Local URL: http://localhost:${PORT}`);
   console.log(`==================================================`);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Please stop the existing server or set PORT to a free port before starting.`);
+    process.exit(1);
+  }
+  console.error('Server error:', err);
+  process.exit(1);
 });
