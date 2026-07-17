@@ -4,3 +4,4 @@ public/gallery.json
 test_photos/
 .DS_Store
 *.log
+settings.json.bak
