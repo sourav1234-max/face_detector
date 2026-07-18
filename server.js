@@ -28,6 +28,7 @@ if (isFirebaseEnabled()) {
   initFirebase();
 }
 
+app.set('trust proxy', true);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -59,9 +60,17 @@ function getPublicBaseUrl(req) {
   }
   if (req) {
     const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-    return `${proto}://${req.get('host')}`;
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    return `${proto}://${host}`;
   }
   return `http://localhost:${PORT}`;
+}
+
+function getGoogleRedirectUri(req) {
+  if (process.env.GOOGLE_REDIRECT_URI) {
+    return process.env.GOOGLE_REDIRECT_URI.replace(/\/$/, '');
+  }
+  return `${getPublicBaseUrl(req)}/api/google/callback`;
 }
 
 async function createGoogleOAuthClient(req) {
@@ -69,7 +78,7 @@ async function createGoogleOAuthClient(req) {
   if (!settings.googleClientId || !settings.googleClientSecret) {
     return null;
   }
-  const redirectUri = `${getPublicBaseUrl(req)}/api/google/callback`;
+  const redirectUri = getGoogleRedirectUri(req);
   return new google.auth.OAuth2(
     settings.googleClientId,
     settings.googleClientSecret,
@@ -334,24 +343,32 @@ async function processUploadTask(req) {
   let filename;
   let storageUrl = '';
 
-  // Prefer Firebase Storage when configured (survives redeploys)
-  if (isFirebaseEnabled()) {
-    const destPath = `photos/${photoId}${ext}`;
-    const uploaded = await uploadToFirebaseStorage(buffer, destPath, req.file.mimetype);
-    filename = `firebase:${uploaded.path}`;
-    storageUrl = uploaded.url;
-    console.log(`[Firebase Storage] Uploaded ${req.file.originalname} -> ${uploaded.path}`);
-  } else if (settings.googleRefreshToken) {
+  // Prefer Google Drive when connected, otherwise use Firebase Storage if enabled.
+  if (settings.googleRefreshToken) {
     try {
       console.log(`[Google Drive] Uploading ${req.file.originalname}...`);
       const driveFileId = await uploadToGoogleDrive(buffer, req.file.originalname, req.file.mimetype);
       filename = `drive:${driveFileId}`;
       console.log(`[Google Drive] Upload completed. File ID: ${driveFileId}`);
     } catch (driveErr) {
-      console.error('[Google Drive] Cloud upload failed, using local storage fallback:', driveErr.message);
+      console.error('[Google Drive] Cloud upload failed:', driveErr.message);
       cachedGoogleFolderId = '';
-      filename = await saveLocalUpload(buffer, ext);
+      if (isFirebaseEnabled()) {
+        const destPath = `photos/${photoId}${ext}`;
+        const uploaded = await uploadToFirebaseStorage(buffer, destPath, req.file.mimetype);
+        filename = `firebase:${uploaded.path}`;
+        storageUrl = uploaded.url;
+        console.log(`[Firebase Storage] Fallback upload ${req.file.originalname} -> ${uploaded.path}`);
+      } else {
+        filename = await saveLocalUpload(buffer, ext);
+      }
     }
+  } else if (isFirebaseEnabled()) {
+    const destPath = `photos/${photoId}${ext}`;
+    const uploaded = await uploadToFirebaseStorage(buffer, destPath, req.file.mimetype);
+    filename = `firebase:${uploaded.path}`;
+    storageUrl = uploaded.url;
+    console.log(`[Firebase Storage] Uploaded ${req.file.originalname} -> ${uploaded.path}`);
   } else {
     filename = await saveLocalUpload(buffer, ext);
   }
