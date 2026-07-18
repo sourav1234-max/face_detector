@@ -472,7 +472,7 @@
           <div class="panel-card" style="margin-bottom: 20px;">
             <div class="card-header">
               <h2>Google Drive Storage</h2>
-              <p>Optional backup. When Firebase is configured on Vercel, photos use Firebase Storage instead.</p>
+              <p>Photos are stored in your Google Drive. Photo metadata (face data, status) is stored in Firebase Firestore.</p>
             </div>
             
             <!-- Connection Status -->
@@ -520,7 +520,8 @@
               </div>
               
               <span style="font-size:10px; color:var(--text-muted); margin-top:8px; display:block; line-height: 1.4;">
-                <i class="fa-solid fa-info-circle"></i> Requires a Web application client created in Google Cloud with Redirect URI <code>http://localhost:3000/api/google/callback</code>
+                <i class="fa-solid fa-info-circle"></i> In Google Cloud Console, create a <strong>Web application</strong> OAuth client and add this Redirect URI exactly:
+                <br><code id="gdrive-redirect-uri" style="word-break:break-all;">Loading...</code>
               </span>
             </div>
           </div>

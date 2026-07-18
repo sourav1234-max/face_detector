@@ -97,7 +97,8 @@ async function computeFaceDescriptors(source) {
 }
 
 // Photo URL Helper (local / Google Drive / Firebase Storage)
-function getPhotoUrl(filename, storageUrl) {
+function getPhotoUrl(filename, storageUrl, imageUrl) {
+  if (imageUrl) return imageUrl;
   if (storageUrl) return storageUrl;
   if (!filename) return '';
   if (filename.startsWith('drive:')) {
@@ -159,7 +160,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.history.replaceState({}, document.title, window.location.pathname);
     await loadDashboardData();
   } else if (urlParams.get('gdrive') === 'missing_scope') {
-    alert("Warning: Google account connected, but Google Drive file creation access was NOT granted. Please disconnect and reconnect, making sure to check the Google Drive file access permission during Google login.");
+    alert("Warning: Google account connected, but Google Drive file creation access was NOT granted. Please disconnect and reconnect, making sure to allow Google Drive file access.");
+    window.history.replaceState({}, document.title, window.location.pathname);
+    await loadDashboardData();
+  } else if (urlParams.get('gdrive') === 'error') {
+    const msg = urlParams.get('msg') ? decodeURIComponent(urlParams.get('msg')) : 'Google OAuth connection failed. Please try again.';
+    alert(`Google Drive connection error: ${msg}`);
     window.history.replaceState({}, document.title, window.location.pathname);
     await loadDashboardData();
   }
@@ -203,7 +209,7 @@ async function verifyPasswordAndLoad(password) {
     }
   } catch (err) {
     console.error("Login verification error:", err);
-    showAuthError('Failed to connect to server. Verify that Node and MySQL database are running.');
+    showAuthError('Failed to connect to server. Verify that the Node.js backend is running and reachable.');
   }
 }
 
@@ -299,10 +305,23 @@ async function loadDashboardData() {
       const clientSecretInput = document.getElementById('gdrive-client-secret');
 
       if (statusBadge) {
-        const isConnected = !!settingsRes.settings.googleRefreshToken;
+        const isConnected = !!settingsRes.settings.googleDriveConnected;
         
         if (clientIdInput) clientIdInput.value = settingsRes.settings.googleClientId || '';
-        if (clientSecretInput) clientSecretInput.value = settingsRes.settings.googleClientSecret || '';
+        if (clientSecretInput) {
+          if (settingsRes.settings.googleClientSecret === '********') {
+            clientSecretInput.value = '';
+            clientSecretInput.placeholder = 'Saved (leave blank to keep current)';
+          } else {
+            clientSecretInput.value = settingsRes.settings.googleClientSecret || '';
+            clientSecretInput.placeholder = 'Enter Google OAuth Client Secret';
+          }
+        }
+
+        const redirectEl = document.getElementById('gdrive-redirect-uri');
+        if (redirectEl && settingsRes.googleRedirectUri) {
+          redirectEl.textContent = settingsRes.googleRedirectUri;
+        }
 
         if (isConnected) {
           statusBadge.className = 'badge badge-approved';
@@ -473,7 +492,7 @@ function renderModerationTable() {
 
     tr.innerHTML = `
         <td>
-          <img src="${getPhotoUrl(photo.filename, photo.storageUrl)}" class="thumb-img" loading="lazy" alt="Thumbnail" onclick="openAdminLightbox('${photo.id}')">
+          <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="thumb-img" loading="lazy" alt="Thumbnail" onclick="openAdminLightbox('${photo.id}')">
         </td>
       <td style="font-weight: 500; font-size:13px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${photo.originalName}">
         ${photo.originalName}
@@ -784,14 +803,39 @@ function setupSettingsEvents() {
   // Google OAuth Authorization Redirect Connect Event
   const gdriveConnectBtn = document.getElementById('gdrive-connect-btn');
   if (gdriveConnectBtn) {
-    gdriveConnectBtn.addEventListener('click', () => {
-      const clientId = document.getElementById('gdrive-client-id').value;
-      const clientSecret = document.getElementById('gdrive-client-secret').value;
-      if (!clientId || !clientSecret) {
-        alert("Please enter both Google Client ID and Google Client Secret, and click 'Save Keys' before connecting.");
+    gdriveConnectBtn.addEventListener('click', async () => {
+      const clientId = document.getElementById('gdrive-client-id').value.trim();
+      const clientSecret = document.getElementById('gdrive-client-secret').value.trim();
+      if (!clientId) {
+        alert("Please enter your Google Client ID.");
         return;
       }
-      window.location.href = '/api/google/auth';
+
+      gdriveConnectBtn.disabled = true;
+      gdriveConnectBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+
+      try {
+        const payload = { googleClientId: clientId };
+        if (clientSecret) payload.googleClientSecret = clientSecret;
+
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.success) {
+          alert("Failed to save Google credentials: " + (res.error || 'Unknown error'));
+          return;
+        }
+
+        window.location.href = '/api/google/auth';
+      } catch (err) {
+        console.error('Connect Google Drive error:', err);
+      } finally {
+        gdriveConnectBtn.disabled = false;
+        gdriveConnectBtn.innerHTML = '<i class="fa-brands fa-google-drive"></i> Connect Gmail';
+      }
     });
   }
 
@@ -799,7 +843,7 @@ function setupSettingsEvents() {
   const gdriveDisconnectBtn = document.getElementById('gdrive-disconnect-btn');
   if (gdriveDisconnectBtn) {
     gdriveDisconnectBtn.addEventListener('click', async () => {
-      if (!confirm("Are you sure you want to disconnect Google Drive? Photos will fall back to local disk storage.")) {
+      if (!confirm("Are you sure you want to disconnect Google Drive? New uploads will use Firebase Storage until you reconnect.")) {
         return;
       }
       try {
@@ -865,8 +909,8 @@ function openAdminLightbox(photoId) {
   const canvas = document.getElementById('lightbox-canvas');
   const downloadLink = document.getElementById('lightbox-download-link');
 
-  img.src = getPhotoUrl(photo.filename, photo.storageUrl);
-  downloadLink.href = getPhotoUrl(photo.filename, photo.storageUrl);
+  img.src = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
+  downloadLink.href = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
   downloadLink.setAttribute('download', photo.originalName);
 
   updateLightboxDetails(photo);

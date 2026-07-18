@@ -15,6 +15,8 @@ const {
   getPhotoById,
   readSettings,
   writeSettings,
+  invalidateSettingsCache,
+  sanitizeSettingsForClient,
   uploadToFirebaseStorage,
   deleteFromFirebaseStorage,
   getFirebaseFileStream
@@ -26,8 +28,11 @@ const PORT = process.env.PORT || 3000;
 
 if (isFirebaseEnabled()) {
   initFirebase();
+} else {
+  console.warn('[Startup] Firebase is not enabled. Firestore metadata storage will not be available.');
 }
 
+validateEnvironment();
 app.set('trust proxy', true);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -73,6 +78,45 @@ function getGoogleRedirectUri(req) {
   return `${getPublicBaseUrl(req)}/api/google/callback`;
 }
 
+function validateEnvironment() {
+  const required = [];
+  const warnings = [];
+
+  if (!process.env.SESSION_SECRET) {
+    warnings.push('SESSION_SECRET is not set. Admin sessions will use the admin password as the HMAC secret.');
+  }
+
+  if (!process.env.PUBLIC_BASE_URL && !process.env.VERCEL_URL && !process.env.GOOGLE_REDIRECT_URI) {
+    warnings.push('PUBLIC_BASE_URL or GOOGLE_REDIRECT_URI is not set. Google OAuth redirect URL may be computed incorrectly when behind a proxy.');
+  }
+
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    warnings.push('GOOGLE_CLIENT_ID and/or GOOGLE_CLIENT_SECRET are not set. Google Drive connection cannot be established until these values are saved in Admin settings.');
+  }
+
+  if (!isFirebaseEnabled()) {
+    const message = 'Firebase environment variables are not fully configured. Firestore metadata storage and uploads will fail without FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY.';
+    if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+      required.push(message);
+    } else {
+      warnings.push(message);
+    }
+  }
+
+  if (isFirebaseEnabled() && !process.env.FIREBASE_STORAGE_BUCKET) {
+    warnings.push('FIREBASE_STORAGE_BUCKET is not set. Firebase Storage file metadata and some features may not work correctly.');
+  }
+
+  if (required.length > 0) {
+    console.error('[ENV VALIDATION] Required environment variables missing:');
+    required.forEach(msg => console.error(` - ${msg}`));
+  }
+  if (warnings.length > 0) {
+    console.warn('[ENV VALIDATION] Environment warnings:');
+    warnings.forEach(msg => console.warn(` - ${msg}`));
+  }
+}
+
 async function createGoogleOAuthClient(req) {
   const settings = await readSettings();
   if (!settings.googleClientId || !settings.googleClientSecret) {
@@ -86,49 +130,75 @@ async function createGoogleOAuthClient(req) {
   );
 }
 
-async function verifyConnectedDriveScopes(settings) {
+async function verifyConnectedDriveScopes(settings, req) {
   if (!settings.googleRefreshToken) {
     settings.googleHasDriveScope = false;
     return settings;
   }
-  if (settings.googleHasDriveScope !== undefined) {
-    return settings;
-  }
 
   try {
-    const oauth2Client = await createGoogleOAuthClient();
+    const oauth2Client = await createGoogleOAuthClient(req);
     if (!oauth2Client) return settings;
     oauth2Client.setCredentials({ refresh_token: settings.googleRefreshToken });
     const { credentials } = await oauth2Client.refreshAccessToken();
     const tokenInfo = await oauth2Client.getTokenInfo(credentials.access_token);
     const scopes = tokenInfo.scopes || [];
-    settings.googleHasDriveScope = scopes.includes('https://www.googleapis.com/auth/drive.file');
-    await writeSettings(settings);
+    const hasDriveScope = scopes.includes('https://www.googleapis.com/auth/drive.file');
+
+    if (settings.googleHasDriveScope !== hasDriveScope) {
+      settings.googleHasDriveScope = hasDriveScope;
+      await writeSettings(settings);
+    }
   } catch (err) {
-    console.error('[Google OAuth] Failed to verify scopes:', err.message);
+    console.error('[Google OAuth] Failed to verify token/scopes:', err.message);
+    settings.googleHasDriveScope = false;
   }
   return settings;
 }
 
+function getStorageMode(settings) {
+  const firebase = isFirebaseEnabled();
+  const drive = !!settings.googleRefreshToken;
+  if (firebase && drive) return 'firebase+drive';
+  if (drive) return 'drive';
+  if (firebase) return 'firebase';
+  return 'local';
+}
+
+const DEFAULT_GOOGLE_DRIVE_FOLDER_NAME = 'FaceMatch_Photos';
 let cachedGoogleFolderId = '';
 
-async function uploadToGoogleDrive(fileBuffer, originalName, mimeType) {
+function getGoogleDriveFileUrl(fileId) {
+  return fileId ? `https://drive.google.com/uc?export=view&id=${fileId}` : '';
+}
+
+function getGoogleDriveFileRoute(fileId) {
+  return fileId ? `/api/drive/photo/${fileId}` : '';
+}
+
+function getConfiguredGoogleDriveFolderId() {
+  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  return folderId ? folderId.trim() : '';
+}
+
+async function uploadToGoogleDrive(fileBuffer, originalName, mimeType, req) {
   const settings = await readSettings();
   if (!settings.googleRefreshToken) {
-    throw new Error('Google Drive is not connected.');
+    throw new Error('Google Drive is not connected. Connect your Google account in Admin settings first.');
   }
 
-  const oauth2Client = await createGoogleOAuthClient();
+  const oauth2Client = await createGoogleOAuthClient(req);
+  if (!oauth2Client) {
+    throw new Error('Google OAuth Client ID and Secret are not configured.');
+  }
   oauth2Client.setCredentials({ refresh_token: settings.googleRefreshToken });
   const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
-  let folderId = '';
-  if (cachedGoogleFolderId) {
-    folderId = cachedGoogleFolderId;
-  } else {
+  let folderId = getConfiguredGoogleDriveFolderId() || cachedGoogleFolderId || '';
+  if (!folderId) {
     try {
       const listRes = await drive.files.list({
-        q: "mimeType='application/vnd.google-apps.folder' and name='FaceMatch_Photos' and trashed=false",
+        q: `mimeType='application/vnd.google-apps.folder' and name='${DEFAULT_GOOGLE_DRIVE_FOLDER_NAME}' and trashed=false`,
         fields: 'files(id)',
         spaces: 'drive'
       });
@@ -137,7 +207,7 @@ async function uploadToGoogleDrive(fileBuffer, originalName, mimeType) {
       } else {
         const createFolder = await drive.files.create({
           resource: {
-            name: 'FaceMatch_Photos',
+            name: DEFAULT_GOOGLE_DRIVE_FOLDER_NAME,
             mimeType: 'application/vnd.google-apps.folder'
           },
           fields: 'id'
@@ -147,6 +217,7 @@ async function uploadToGoogleDrive(fileBuffer, originalName, mimeType) {
       if (folderId) cachedGoogleFolderId = folderId;
     } catch (err) {
       console.error('Google Drive folder error:', err.message);
+      throw new Error('Unable to prepare the Google Drive folder. Check Drive permissions and folder configuration.');
     }
   }
 
@@ -155,7 +226,7 @@ async function uploadToGoogleDrive(fileBuffer, originalName, mimeType) {
   bufferStream.end(fileBuffer);
 
   const response = await drive.files.create({
-    resource: {
+    requestBody: {
       name: originalName,
       parents: folderId ? [folderId] : []
     },
@@ -163,14 +234,35 @@ async function uploadToGoogleDrive(fileBuffer, originalName, mimeType) {
     fields: 'id'
   });
 
-  return response.data.id;
+  const fileId = response.data.id;
+  if (!fileId) {
+    throw new Error('Google Drive upload completed but no file ID was returned.');
+  }
+
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: {
+        role: 'reader',
+        type: 'anyone'
+      }
+    });
+  } catch (permErr) {
+    console.warn('Google Drive permission create failed:', permErr.message);
+  }
+
+  return {
+    fileId,
+    imageUrl: getGoogleDriveFileUrl(fileId)
+  };
 }
 
-async function deleteFromGoogleDrive(fileId) {
+async function deleteFromGoogleDrive(fileId, req) {
   const settings = await readSettings();
   if (!settings.googleRefreshToken) return;
   try {
-    const oauth2Client = await createGoogleOAuthClient();
+    const oauth2Client = await createGoogleOAuthClient(req);
+    if (!oauth2Client) return;
     oauth2Client.setCredentials({ refresh_token: settings.googleRefreshToken });
     const drive = google.drive({ version: 'v3', auth: oauth2Client });
     await drive.files.delete({ fileId });
@@ -180,13 +272,13 @@ async function deleteFromGoogleDrive(fileId) {
   }
 }
 
-async function deletePhotoAssets(photo) {
+async function deletePhotoAssets(photo, req) {
   if (!photo || !photo.filename) return;
 
   if (photo.filename.startsWith('firebase:')) {
     await deleteFromFirebaseStorage(photo.filename.slice('firebase:'.length));
   } else if (photo.filename.startsWith('drive:')) {
-    await deleteFromGoogleDrive(photo.filename.split(':')[1]);
+    await deleteFromGoogleDrive(photo.filename.split(':')[1], req);
   } else {
     const filePath = path.join(__dirname, 'public', 'uploads', photo.filename);
     if (fs.existsSync(filePath)) {
@@ -301,7 +393,7 @@ app.get('/api/gallery', async (req, res) => {
         photos: [],
         publicGalleryEnabled: false,
         logoWidth: settings.logoWidth,
-        storageMode: isFirebaseEnabled() ? 'firebase' : 'local'
+        storageMode: getStorageMode(settings)
       });
     }
     const gallery = await readGalleryDb();
@@ -311,7 +403,7 @@ app.get('/api/gallery', async (req, res) => {
       photos: publicPhotos,
       publicGalleryEnabled: true,
       logoWidth: settings.logoWidth,
-      storageMode: isFirebaseEnabled() ? 'firebase' : 'local'
+      storageMode: getStorageMode(settings)
     });
   } catch (err) {
     console.error('Gallery endpoint error:', err);
@@ -340,64 +432,58 @@ async function processUploadTask(req) {
     }
   }
 
+  if (!settings.googleRefreshToken) {
+    throw new Error('Google Drive is not connected. Connect your Google account in Admin settings before uploading photos.');
+  }
+  if (!isFirebaseEnabled()) {
+    throw new Error('Firebase Firestore is not configured. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY before uploading.');
+  }
+
+  const uploadedBy = isAdmin ? 'admin' : (req.ip || req.headers['x-forwarded-for'] || 'anonymous');
+  const uploadTime = new Date().toISOString();
+  const fileSize = req.file.size || 0;
+  const mimeType = req.file.mimetype || 'application/octet-stream';
+  const originalFileName = req.file.originalname;
+
+  let fileId;
   let filename;
   let storageUrl = '';
 
-  // Prefer Google Drive when connected, otherwise use Firebase Storage if enabled.
-  if (settings.googleRefreshToken) {
-    try {
-      console.log(`[Google Drive] Uploading ${req.file.originalname}...`);
-      const driveFileId = await uploadToGoogleDrive(buffer, req.file.originalname, req.file.mimetype);
-      filename = `drive:${driveFileId}`;
-      console.log(`[Google Drive] Upload completed. File ID: ${driveFileId}`);
-    } catch (driveErr) {
-      console.error('[Google Drive] Cloud upload failed:', driveErr.message);
-      cachedGoogleFolderId = '';
-      if (isFirebaseEnabled()) {
-        const destPath = `photos/${photoId}${ext}`;
-        const uploaded = await uploadToFirebaseStorage(buffer, destPath, req.file.mimetype);
-        filename = `firebase:${uploaded.path}`;
-        storageUrl = uploaded.url;
-        console.log(`[Firebase Storage] Fallback upload ${req.file.originalname} -> ${uploaded.path}`);
-      } else {
-        filename = await saveLocalUpload(buffer, ext);
-      }
-    }
-  } else if (isFirebaseEnabled()) {
-    const destPath = `photos/${photoId}${ext}`;
-    const uploaded = await uploadToFirebaseStorage(buffer, destPath, req.file.mimetype);
-    filename = `firebase:${uploaded.path}`;
-    storageUrl = uploaded.url;
-    console.log(`[Firebase Storage] Uploaded ${req.file.originalname} -> ${uploaded.path}`);
-  } else {
-    filename = await saveLocalUpload(buffer, ext);
-  }
+  console.log(`[Google Drive] Uploading ${originalFileName}...`);
+  const driveUpload = await uploadToGoogleDrive(buffer, originalFileName, mimeType, req);
+  fileId = driveUpload.fileId;
+  filename = `drive:${fileId}`;
+  storageUrl = getGoogleDriveFileRoute(fileId);
+  const imageUrl = driveUpload.imageUrl || getGoogleDriveFileUrl(fileId);
+  console.log(`[Google Drive] Upload completed. File ID: ${fileId} URL: ${imageUrl}`);
 
   const newPhoto = {
     id: photoId,
+    fileId,
     filename,
+    imageUrl,
     storageUrl,
-    originalName: req.file.originalname,
-    timestamp: new Date().toISOString(),
+    originalName: originalFileName,
+    originalFileName,
+    fileSize,
+    mimeType,
+    uploadedBy,
+    uploadTime,
+    timestamp: uploadTime,
     descriptors,
     status: isAdmin ? 'approved' : 'pending',
     isPublic: isAdmin ? (req.body.isPublic === 'true' || req.body.isPublic === true) : false
   };
 
-  await addPhoto(newPhoto);
+  try {
+    await addPhoto(newPhoto);
+  } catch (dbErr) {
+    // Roll back uploaded file if metadata save fails
+    await deletePhotoAssets(newPhoto, req);
+    throw new Error(`Failed to save photo metadata: ${dbErr.message}`);
+  }
   console.log(`Uploaded: ${newPhoto.filename} with ${descriptors.length} face descriptors (Admin: ${isAdmin})`);
   return newPhoto;
-}
-
-async function saveLocalUpload(buffer, ext) {
-  const uploadPath = path.join(__dirname, 'public', 'uploads');
-  if (!fs.existsSync(uploadPath)) {
-    fs.mkdirSync(uploadPath, { recursive: true });
-  }
-  const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-  const filename = 'photo-' + uniqueSuffix + ext;
-  fs.writeFileSync(path.join(uploadPath, filename), buffer);
-  return filename;
 }
 
 app.post('/api/upload', upload.single('photo'), async (req, res) => {
@@ -406,16 +492,17 @@ app.post('/api/upload', upload.single('photo'), async (req, res) => {
       return res.status(400).json({ success: false, error: 'No image file uploaded' });
     }
 
-    const newPhoto = await new Promise((resolve, reject) => {
-      uploadProcessingQueue = uploadProcessingQueue.then(async () => {
-        try {
-          resolve(await processUploadTask(req));
-        } catch (err) {
-          reject(err);
-        }
-      });
+    const queuedUpload = uploadProcessingQueue
+      .catch((prevErr) => {
+        console.warn('Recovered upload queue after previous failure:', prevErr && prevErr.message ? prevErr.message : prevErr);
+      })
+      .then(() => processUploadTask(req));
+
+    uploadProcessingQueue = queuedUpload.catch((err) => {
+      console.warn('Upload task failed:', err && err.message ? err.message : err);
     });
 
+    const newPhoto = await queuedUpload;
     res.json({ success: true, photo: newPhoto });
   } catch (err) {
     console.error('Upload endpoint error:', err);
@@ -520,11 +607,29 @@ app.get('/api/storage/photo', async (req, res) => {
 
 // --- Google OAuth ---
 
+app.get('/api/google/redirect-uri', async (req, res) => {
+  res.json({
+    success: true,
+    redirectUri: getGoogleRedirectUri(req),
+    publicBaseUrl: getPublicBaseUrl(req)
+  });
+});
+
 app.get('/api/google/auth', async (req, res) => {
+  const settings = await readSettings();
+  if (!settings.googleClientId || !settings.googleClientSecret) {
+    return res.status(400).send(
+      'Google Client ID and Secret are not saved yet. Open Admin → Google Drive Storage, enter your keys, click Save Keys, then Connect Gmail.'
+    );
+  }
+
   const oauth2Client = await createGoogleOAuthClient(req);
   if (!oauth2Client) {
-    return res.status(400).send('Please configure Google Client ID and Secret in settings first.');
+    return res.status(400).send('Could not create Google OAuth client. Check your Client ID and Secret.');
   }
+
+  const redirectUri = getGoogleRedirectUri(req);
+  console.log(`[Google OAuth] Starting auth flow. Redirect URI: ${redirectUri}`);
 
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
@@ -532,7 +637,8 @@ app.get('/api/google/auth', async (req, res) => {
       'https://www.googleapis.com/auth/drive.file',
       'https://www.googleapis.com/auth/userinfo.email'
     ],
-    prompt: 'consent'
+    prompt: 'consent',
+    include_granted_scopes: true
   });
   res.redirect(url);
 });
@@ -557,7 +663,8 @@ app.get('/api/google/callback', async (req, res) => {
       console.error('Failed to retrieve user email:', err.message);
     }
 
-    const scopesGranted = (tokens.scope || '').split(' ');
+    const tokenInfo = await oauth2Client.getTokenInfo(tokens.access_token);
+    const scopesGranted = (tokenInfo.scopes || []).concat(tokens.scope ? tokens.scope.split(' ') : []);
     const hasDriveScope = scopesGranted.includes('https://www.googleapis.com/auth/drive.file');
     const settings = await readSettings();
 
@@ -571,12 +678,16 @@ app.get('/api/google/callback', async (req, res) => {
 
     settings.googleConnectedEmail = email;
     settings.googleHasDriveScope = hasDriveScope;
+
+    invalidateSettingsCache();
     await writeSettings(settings);
+    console.log(`[Google OAuth] Connected ${email}. Drive scope: ${hasDriveScope}. Saved to ${isFirebaseEnabled() ? 'Firestore' : 'local settings'}.`);
 
     res.redirect(hasDriveScope ? '/admin.html?gdrive=success' : '/admin.html?gdrive=missing_scope');
   } catch (err) {
     console.error('Google OAuth callback error:', err);
-    res.status(500).send('OAuth verification failed: ' + err.message);
+    const msg = encodeURIComponent(err.message || 'OAuth verification failed');
+    res.redirect(`/admin.html?gdrive=error&msg=${msg}`);
   }
 });
 
@@ -616,20 +727,12 @@ app.post('/api/admin/logout', (req, res) => {
 
 app.get('/api/admin/settings', checkAdminAuth, async (req, res) => {
   let settings = await readSettings();
-  settings = await verifyConnectedDriveScopes(settings);
+  settings = await verifyConnectedDriveScopes(settings, req);
   res.json({
     success: true,
-    storageMode: isFirebaseEnabled() ? 'firebase' : (settings.googleRefreshToken ? 'drive' : 'local'),
-    settings: {
-      publicGalleryEnabled: settings.publicGalleryEnabled,
-      logoWidth: settings.logoWidth,
-      photoRetentionHours: settings.photoRetentionHours,
-      googleClientId: settings.googleClientId,
-      googleClientSecret: settings.googleClientSecret,
-      googleRefreshToken: settings.googleRefreshToken,
-      googleConnectedEmail: settings.googleConnectedEmail,
-      googleHasDriveScope: settings.googleHasDriveScope
-    }
+    storageMode: getStorageMode(settings),
+    googleRedirectUri: getGoogleRedirectUri(req),
+    settings: sanitizeSettingsForClient(settings)
   });
 });
 
@@ -645,26 +748,23 @@ app.post('/api/admin/settings', checkAdminAuth, async (req, res) => {
     settings.googleClientId = googleClientId.trim();
     cachedGoogleFolderId = '';
   }
-  if (googleClientSecret !== undefined) {
+  if (googleClientSecret !== undefined && googleClientSecret !== '********') {
     settings.googleClientSecret = googleClientSecret.trim();
     cachedGoogleFolderId = '';
   }
 
-  await writeSettings(settings);
-  res.json({
-    success: true,
-    storageMode: isFirebaseEnabled() ? 'firebase' : (settings.googleRefreshToken ? 'drive' : 'local'),
-    settings: {
-      publicGalleryEnabled: settings.publicGalleryEnabled,
-      logoWidth: settings.logoWidth,
-      photoRetentionHours: settings.photoRetentionHours,
-      googleClientId: settings.googleClientId,
-      googleClientSecret: settings.googleClientSecret,
-      googleRefreshToken: settings.googleRefreshToken,
-      googleConnectedEmail: settings.googleConnectedEmail,
-      googleHasDriveScope: settings.googleHasDriveScope
-    }
-  });
+  try {
+    invalidateSettingsCache();
+    await writeSettings(settings);
+    res.json({
+      success: true,
+      storageMode: getStorageMode(settings),
+      googleRedirectUri: getGoogleRedirectUri(req),
+      settings: sanitizeSettingsForClient(settings)
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get('/api/admin/gallery', checkAdminAuth, async (req, res) => {
@@ -761,7 +861,7 @@ app.post('/api/delete', checkAdminAuth, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Photo not found in registry' });
     }
 
-    await deletePhotoAssets(photoToDelete);
+    await deletePhotoAssets(photoToDelete, req);
     await deletePhotoRecord(id);
     res.json({ success: true, message: 'Photo deleted successfully' });
   } catch (err) {
@@ -775,7 +875,7 @@ app.post('/api/admin/delete-all', checkAdminAuth, async (req, res) => {
     const gallery = await readGalleryDb();
     console.log(`[Admin Delete All] Deleting all ${gallery.length} photos...`);
     for (const photo of gallery) {
-      await deletePhotoAssets(photo);
+      await deletePhotoAssets(photo, req);
     }
     await writeGalleryDb([]);
     res.json({ success: true, message: 'All photos deleted successfully' });
@@ -805,7 +905,7 @@ async function runPhotoCleanup() {
     for (const photo of gallery) {
       const ageMs = now - Date.parse(photo.timestamp);
       if (ageMs > expirationMs) {
-        await deletePhotoAssets(photo);
+        await deletePhotoAssets(photo, null);
         await deletePhotoRecord(photo.id);
         deletedCount++;
       }
@@ -830,7 +930,7 @@ if (require.main === module) {
     console.log('==================================================');
     console.log(' Face Detection Gallery Server is running!');
     console.log(` Local URL: http://localhost:${PORT}`);
-    console.log(` Storage: ${isFirebaseEnabled() ? 'Firebase' : 'Local/Drive'}`);
+    console.log(` Storage: ${isFirebaseEnabled() ? 'Firebase metadata' : 'Local metadata'} + Google Drive photos when connected`);
     console.log('==================================================');
   });
 

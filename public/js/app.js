@@ -112,7 +112,8 @@ let galleryRefreshTimer = null;
 const GALLERY_PAGE_SIZE = 100; // images per page
 let currentGalleryPage = 0;
 
-function getPhotoUrl(filename, storageUrl) {
+function getPhotoUrl(filename, storageUrl, imageUrl) {
+  if (imageUrl) return imageUrl;
   if (storageUrl) return storageUrl;
   if (!filename) return '';
   if (filename.startsWith('drive:')) {
@@ -579,7 +580,7 @@ function renderGalleryPage() {
     itemEl.innerHTML = `
       ${badgeHtml}
       <div class="gallery-image-wrapper">
-        <img src="${getPhotoUrl(photo.filename, photo.storageUrl)}" class="gallery-image" alt="Gallery photo" loading="lazy">
+        <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="gallery-image" alt="Gallery photo" loading="lazy">
         <div class="gallery-item-overlay">
           <div class="gallery-item-info">
             <p class="gallery-item-name">${photo.originalName}</p>
@@ -992,7 +993,7 @@ async function performSearch() {
           <i class="fa-solid fa-circle-check"></i> ${match.confidence}% match
         </div>
         <div class="gallery-image-wrapper">
-          <img src="${getPhotoUrl(photo.filename, photo.storageUrl)}" class="gallery-image" alt="Match">
+          <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="gallery-image" alt="Match">
           <div class="gallery-item-overlay">
             <div class="gallery-item-info">
               <p class="gallery-item-name">${photo.originalName}</p>
@@ -1032,7 +1033,7 @@ async function downloadAllMatchesZip() {
     // Fetch and add each image to zip
     for (let i = 0; i < window.activeSearchMatches.length; i++) {
       const photo = window.activeSearchMatches[i];
-      const imageUrl = getPhotoUrl(photo.filename, photo.storageUrl);
+      const imageUrl = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
       
       const response = await fetch(imageUrl);
       const blob = await response.blob();
@@ -1091,7 +1092,7 @@ function openLightbox(photo) {
   const downloadLink = document.getElementById('lightbox-download-link');
   const deleteBtn = document.getElementById('lightbox-delete-btn');
 
-  img.src = getPhotoUrl(photo.filename, photo.storageUrl);
+  img.src = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
   filename.innerText = photo.originalName;
   
   date.innerText = new Date(photo.timestamp).toLocaleString(undefined, {
@@ -1105,7 +1106,7 @@ function openLightbox(photo) {
   const facesCount = photo.descriptors ? photo.descriptors.length : 0;
   faces.innerText = `${facesCount} face(s) identified`;
 
-  downloadLink.href = getPhotoUrl(photo.filename, photo.storageUrl);
+  downloadLink.href = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
   downloadLink.setAttribute('download', photo.originalName);
 
   // Hide delete button for normal public users
