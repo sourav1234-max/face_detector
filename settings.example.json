@@ -2,7 +2,7 @@
   "adminPassword": "admin123",
   "publicGalleryEnabled": true,
   "logoWidth": 225,
-  "photoRetentionHours": 24,
+  "photoRetentionHours": 0,
   "googleClientId": "",
   "googleClientSecret": "",
   "googleRefreshToken": "",

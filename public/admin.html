@@ -472,7 +472,7 @@
           <div class="panel-card" style="margin-bottom: 20px;">
             <div class="card-header">
               <h2>Google Drive Storage</h2>
-              <p>Store uploaded photos securely in your personal cloud</p>
+              <p>Optional backup. When Firebase is configured on Vercel, photos use Firebase Storage instead.</p>
             </div>
             
             <!-- Connection Status -->
@@ -574,6 +574,18 @@
               </div>
               <input type="range" id="logo-width-slider" min="120" max="380" step="5" value="245"
                 style="width:100%; cursor:pointer;">
+            </div>
+
+            <!-- Photo retention (0 = keep forever) -->
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.05); margin: 20px 0 16px 0;">
+            <h3 style="font-size:14px; font-family:var(--font-display); margin-bottom:8px; color:#fff;">Photo Retention</h3>
+            <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+              Hours before photos are auto-deleted. Set to <strong>0</strong> to keep forever (recommended).
+            </p>
+            <div class="form-group">
+              <label class="form-label" for="photo-retention-input">Auto-delete after (hours)</label>
+              <input type="number" id="photo-retention-input" class="form-input" min="0" step="1" value="0"
+                placeholder="0 = never delete">
             </div>
 
             <!-- Change Admin Password -->
@@ -731,6 +743,7 @@
     </div>
   </div>
 
+  <script src="js/face-api.js"></script>
   <script src="js/admin.js"></script>
 </body>
 

@@ -65,10 +65,7 @@ async function computeFaceDescriptors(source) {
   await loadFaceApiModels();
 
   const img = await loadImageElement(source);
-  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.5 });
-  const detections = await faceapi.detectAllFaces(img, options).withFaceLandmarks().withFaceDescriptors();
-
-  return detections.map(detection => ({
+  const mapDetections = (detections) => detections.map(detection => ({
     box: {
       x: Math.round(detection.detection.box.left),
       y: Math.round(detection.detection.box.top),
@@ -77,6 +74,32 @@ async function computeFaceDescriptors(source) {
     },
     descriptor: Array.from(detection.descriptor)
   }));
+
+  // Primary: TinyFaceDetector (fast). Slightly looser threshold for real-world photos.
+  let detections = await faceapi
+    .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.35 }))
+    .withFaceLandmarks()
+    .withFaceDescriptors();
+
+  // Fallback: SSD MobileNet if TinyFace finds nothing (better for small/side faces)
+  if (detections.length === 0 && faceapi.nets.ssdMobilenetv1.isLoaded) {
+    detections = await faceapi
+      .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }))
+      .withFaceLandmarks()
+      .withFaceDescriptors();
+  } else if (detections.length === 0) {
+    try {
+      await faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath);
+      detections = await faceapi
+        .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+    } catch (ssdErr) {
+      console.warn('SSD MobileNet fallback unavailable:', ssdErr);
+    }
+  }
+
+  return mapDetections(detections);
 }
 // Limits to protect browser memory
 const MAX_UPLOAD_SIZE = 30 * 1024 * 1024; // 30 MB per file
@@ -89,11 +112,17 @@ let galleryRefreshTimer = null;
 const GALLERY_PAGE_SIZE = 100; // images per page
 let currentGalleryPage = 0;
 
-function getPhotoUrl(filename) {
+function getPhotoUrl(filename, storageUrl) {
+  if (storageUrl) return storageUrl;
   if (!filename) return '';
-  return filename.startsWith('drive:')
-    ? `/api/drive/photo/${filename.split(':')[1]}`
-    : `/uploads/${filename}`;
+  if (filename.startsWith('drive:')) {
+    return `/api/drive/photo/${filename.split(':')[1]}`;
+  }
+  if (filename.startsWith('firebase:')) {
+    const storagePath = filename.slice('firebase:'.length);
+    return `/api/storage/photo?path=${encodeURIComponent(storagePath)}`;
+  }
+  return `/uploads/${filename}`;
 }
 
 // --- Initialize and Load Models ---
@@ -550,7 +579,7 @@ function renderGalleryPage() {
     itemEl.innerHTML = `
       ${badgeHtml}
       <div class="gallery-image-wrapper">
-        <img src="${getPhotoUrl(photo.filename)}" class="gallery-image" alt="Gallery photo" loading="lazy">
+        <img src="${getPhotoUrl(photo.filename, photo.storageUrl)}" class="gallery-image" alt="Gallery photo" loading="lazy">
         <div class="gallery-item-overlay">
           <div class="gallery-item-info">
             <p class="gallery-item-name">${photo.originalName}</p>
@@ -963,7 +992,7 @@ async function performSearch() {
           <i class="fa-solid fa-circle-check"></i> ${match.confidence}% match
         </div>
         <div class="gallery-image-wrapper">
-          <img src="${getPhotoUrl(photo.filename)}" class="gallery-image" alt="Match">
+          <img src="${getPhotoUrl(photo.filename, photo.storageUrl)}" class="gallery-image" alt="Match">
           <div class="gallery-item-overlay">
             <div class="gallery-item-info">
               <p class="gallery-item-name">${photo.originalName}</p>
@@ -1003,7 +1032,7 @@ async function downloadAllMatchesZip() {
     // Fetch and add each image to zip
     for (let i = 0; i < window.activeSearchMatches.length; i++) {
       const photo = window.activeSearchMatches[i];
-      const imageUrl = getPhotoUrl(photo.filename);
+      const imageUrl = getPhotoUrl(photo.filename, photo.storageUrl);
       
       const response = await fetch(imageUrl);
       const blob = await response.blob();
@@ -1062,7 +1091,7 @@ function openLightbox(photo) {
   const downloadLink = document.getElementById('lightbox-download-link');
   const deleteBtn = document.getElementById('lightbox-delete-btn');
 
-  img.src = getPhotoUrl(photo.filename);
+  img.src = getPhotoUrl(photo.filename, photo.storageUrl);
   filename.innerText = photo.originalName;
   
   date.innerText = new Date(photo.timestamp).toLocaleString(undefined, {
@@ -1076,7 +1105,7 @@ function openLightbox(photo) {
   const facesCount = photo.descriptors ? photo.descriptors.length : 0;
   faces.innerText = `${facesCount} face(s) identified`;
 
-  downloadLink.href = getPhotoUrl(photo.filename);
+  downloadLink.href = getPhotoUrl(photo.filename, photo.storageUrl);
   downloadLink.setAttribute('download', photo.originalName);
 
   // Hide delete button for normal public users

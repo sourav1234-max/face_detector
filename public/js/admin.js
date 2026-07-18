@@ -6,18 +6,108 @@
 window.allPhotos = [];
 window.activeFilter = 'all';
 window.selectedPhotoForLightbox = null;
+window.faceApiLoaded = false;
 // Admin-side limits to prevent memory issues
 const ADMIN_MAX_UPLOAD_SIZE = 30 * 1024 * 1024; // 30 MB
 const ADMIN_MAX_UPLOAD_QUEUE = 50; // max files admin can queue
 const ADMIN_MOD_TABLE_PAGE_SIZE = 12; // rows per moderation page (reduced to avoid memory spikes)
 let adminModCurrentPage = 0;
 
-// Photo URL Helper (handles local fallback vs. Google Drive proxy streams)
-function getPhotoUrl(filename) {
+const LOCAL_MODEL_PATH = '/models';
+const CDN_MODEL_PATH = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+let modelPath = LOCAL_MODEL_PATH;
+
+async function loadFaceApiModels() {
+  if (window.faceApiLoaded) return;
+  if (typeof faceapi === 'undefined') {
+    throw new Error('face-api.js is not loaded. Refresh the page and try again.');
+  }
+
+  try {
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
+      faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
+      faceapi.nets.faceRecognitionNet.loadFromUri(modelPath)
+    ]);
+    window.faceApiLoaded = true;
+  } catch (err) {
+    console.warn('Local face-api models failed, falling back to CDN:', err);
+    modelPath = CDN_MODEL_PATH;
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
+      faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
+      faceapi.nets.faceRecognitionNet.loadFromUri(modelPath)
+    ]);
+    window.faceApiLoaded = true;
+  }
+}
+
+function loadImageElement(source) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Could not load image for face detection.'));
+    if (source instanceof File || source instanceof Blob) {
+      const objectUrl = URL.createObjectURL(source);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(img);
+      };
+      img.src = objectUrl;
+    } else {
+      img.src = source;
+    }
+  });
+}
+
+async function computeFaceDescriptors(source) {
+  await loadFaceApiModels();
+  const img = await loadImageElement(source);
+  const mapDetections = (detections) => detections.map(detection => ({
+    box: {
+      x: Math.round(detection.detection.box.left),
+      y: Math.round(detection.detection.box.top),
+      width: Math.round(detection.detection.box.width),
+      height: Math.round(detection.detection.box.height)
+    },
+    descriptor: Array.from(detection.descriptor)
+  }));
+
+  let detections = await faceapi
+    .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.35 }))
+    .withFaceLandmarks()
+    .withFaceDescriptors();
+
+  if (detections.length === 0) {
+    try {
+      if (!faceapi.nets.ssdMobilenetv1.isLoaded) {
+        await faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath);
+      }
+      detections = await faceapi
+        .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+    } catch (ssdErr) {
+      console.warn('SSD MobileNet fallback unavailable:', ssdErr);
+    }
+  }
+
+  return mapDetections(detections);
+}
+
+// Photo URL Helper (local / Google Drive / Firebase Storage)
+function getPhotoUrl(filename, storageUrl) {
+  if (storageUrl) return storageUrl;
   if (!filename) return '';
-  return filename.startsWith('drive:') 
-    ? `/api/drive/photo/${filename.split(':')[1]}` 
-    : `/uploads/${filename}`;
+  if (filename.startsWith('drive:')) {
+    return `/api/drive/photo/${filename.split(':')[1]}`;
+  }
+  if (filename.startsWith('firebase:')) {
+    const storagePath = filename.slice('firebase:'.length);
+    return `/api/storage/photo?path=${encodeURIComponent(storagePath)}`;
+  }
+  return `/uploads/${filename}`;
 }
 
 // --- Helper AJAX function with Auth Header ---
@@ -194,7 +284,7 @@ async function loadDashboardData() {
       // Update photo retention input
       const retentionInput = document.getElementById('photo-retention-input');
       if (retentionInput) {
-        retentionInput.value = settingsRes.settings.photoRetentionHours !== undefined ? settingsRes.settings.photoRetentionHours : 24;
+        retentionInput.value = settingsRes.settings.photoRetentionHours !== undefined ? settingsRes.settings.photoRetentionHours : 0;
       }
 
       // Update Google Drive controls & connection badges
@@ -381,7 +471,7 @@ function renderModerationTable() {
 
     tr.innerHTML = `
         <td>
-          <img src="${getPhotoUrl(photo.filename)}" class="thumb-img" loading="lazy" alt="Thumbnail" onclick="openAdminLightbox('${photo.id}')">
+          <img src="${getPhotoUrl(photo.filename, photo.storageUrl)}" class="thumb-img" loading="lazy" alt="Thumbnail" onclick="openAdminLightbox('${photo.id}')">
         </td>
       <td style="font-weight: 500; font-size:13px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${photo.originalName}">
         ${photo.originalName}
@@ -773,8 +863,8 @@ function openAdminLightbox(photoId) {
   const canvas = document.getElementById('lightbox-canvas');
   const downloadLink = document.getElementById('lightbox-download-link');
 
-  img.src = getPhotoUrl(photo.filename);
-  downloadLink.href = getPhotoUrl(photo.filename);
+  img.src = getPhotoUrl(photo.filename, photo.storageUrl);
+  downloadLink.href = getPhotoUrl(photo.filename, photo.storageUrl);
   downloadLink.setAttribute('download', photo.originalName);
 
   updateLightboxDetails(photo);
@@ -1156,12 +1246,26 @@ async function startAdminBatchUpload() {
     item.status = 'uploading';
     const statusEl = document.getElementById(`${item.id}-status`);
     if (statusEl) {
-      statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading...`;
+      statusEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Detecting faces...`;
+    }
+
+    let descriptors = [];
+    try {
+      descriptors = await computeFaceDescriptors(item.file);
+      if (statusEl) {
+        statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading (${descriptors.length} face${descriptors.length === 1 ? '' : 's'})...`;
+      }
+    } catch (faceErr) {
+      console.warn('Admin face detection failed for', item.file.name, faceErr);
+      if (statusEl) {
+        statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading (no faces)...`;
+      }
     }
 
     const formData = new FormData();
     formData.append('photo', item.file);
     formData.append('isPublic', isPublicCheckbox ? isPublicCheckbox.checked : true);
+    formData.append('descriptors', JSON.stringify(descriptors));
 
     try {
       const response = await fetch('/api/upload', {
@@ -1175,7 +1279,10 @@ async function startAdminBatchUpload() {
         item.status = 'done';
         if (statusEl) {
           statusEl.className = 'preview-status ready';
-          statusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> Uploaded`;
+          const faceLabel = descriptors.length > 0
+            ? `Uploaded · ${descriptors.length} face(s)`
+            : 'Uploaded · no face detected';
+          statusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${faceLabel}`;
         }
         
         setTimeout(() => {
