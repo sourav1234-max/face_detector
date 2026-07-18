@@ -319,8 +319,19 @@ async function loadDashboardData() {
         }
 
         const redirectEl = document.getElementById('gdrive-redirect-uri');
-        if (redirectEl && settingsRes.googleRedirectUri) {
-          redirectEl.textContent = settingsRes.googleRedirectUri;
+        const copyRedirectBtn = document.getElementById('gdrive-copy-redirect-btn');
+        if (redirectEl) {
+          redirectEl.textContent = settingsRes.googleRedirectUri || 'Redirect URI not available yet.';
+        }
+        if (copyRedirectBtn) {
+          copyRedirectBtn.disabled = !settingsRes.googleRedirectUri;
+          copyRedirectBtn.addEventListener('click', () => {
+            if (settingsRes.googleRedirectUri) {
+              navigator.clipboard.writeText(settingsRes.googleRedirectUri)
+                .then(() => alert('Redirect URI copied to clipboard'))
+                .catch(() => alert('Failed to copy redirect URI'));
+            }
+          });
         }
 
         if (isConnected) {
