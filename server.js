@@ -56,6 +56,11 @@ const multerMemory = multer({
   limits: { fileSize: 5 * 1024 * 1024 }
 });
 
+function normalizeHost(host) {
+  if (!host) return host;
+  return host.replace(/:(80|443)$/, '');
+}
+
 function getPublicBaseUrl(req) {
   if (process.env.PUBLIC_BASE_URL) {
     return process.env.PUBLIC_BASE_URL.replace(/\/$/, '');
@@ -64,8 +69,9 @@ function getPublicBaseUrl(req) {
     return `https://${process.env.VERCEL_URL}`;
   }
   if (req) {
-    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+    const rawHost = req.headers['x-forwarded-host'] || req.headers.host || req.get('host');
+    const host = normalizeHost(rawHost);
     return `${proto}://${host}`;
   }
   return `http://localhost:${PORT}`;
