@@ -9,12 +9,9 @@ function getGoogleOAuthClient() {
   if (!settings.googleClientId || !settings.googleClientSecret) {
     return null;
   }
-  const redirectUri = 'http://localhost:3000/api/google/callback';
-  return new google.auth.OAuth2(
-    settings.googleClientId,
-    settings.googleClientSecret,
-    redirectUri
-  );
+  const redirectUri =  process.env.NODE_ENV === 'production'
+    ? 'https://face-detector-1fjtfvbls3-sourav23.vercel.app/api/google/callback'
+    : 'http://localhost:3000/api/google/callback';
 }
 
 async function checkScopes() {
