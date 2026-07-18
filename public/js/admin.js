@@ -141,7 +141,7 @@ async function adminFetch(url, options = {}) {
 }
 
 // --- Initialize Admin App ---
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   setupAuthEvents();
   setupTabFilters();
   setupSettingsEvents();
@@ -157,9 +157,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (urlParams.get('gdrive') === 'success') {
     alert("Successfully authenticated with your Gmail account and connected to Google Drive!");
     window.history.replaceState({}, document.title, window.location.pathname);
+    await loadDashboardData();
   } else if (urlParams.get('gdrive') === 'missing_scope') {
     alert("Warning: Google account connected, but Google Drive file creation access was NOT granted. Please disconnect and reconnect, making sure to check the Google Drive file access permission during Google login.");
     window.history.replaceState({}, document.title, window.location.pathname);
+    await loadDashboardData();
   }
 
   // Check if we are already logged in through a session cookie
