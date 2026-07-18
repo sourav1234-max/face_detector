@@ -109,6 +109,10 @@ function validateEnvironment() {
     }
   }
 
+  if (process.env.VERCEL && !isFirebaseEnabled()) {
+    warnings.push('Running on Vercel without Firebase means settings and uploaded metadata may not persist across serverless cold starts. Configure Firebase to persist state.');
+  }
+
   if (isFirebaseEnabled() && !process.env.FIREBASE_STORAGE_BUCKET) {
     warnings.push('FIREBASE_STORAGE_BUCKET is not set. Firebase Storage file metadata and some features may not work correctly.');
   }
@@ -231,17 +235,24 @@ async function uploadToGoogleDrive(fileBuffer, originalName, mimeType, req) {
   const bufferStream = new stream.PassThrough();
   bufferStream.end(fileBuffer);
 
-  const response = await drive.files.create({
-    requestBody: {
-      name: originalName,
-      parents: folderId ? [folderId] : []
-    },
-    media: { mimeType, body: bufferStream },
-    fields: 'id'
-  });
+  let response;
+  try {
+    response = await drive.files.create({
+      requestBody: {
+        name: originalName,
+        parents: folderId ? [folderId] : []
+      },
+      media: { mimeType, body: bufferStream },
+      fields: 'id, webViewLink, webContentLink'
+    });
+  } catch (createErr) {
+    console.error('[Google Drive] files.create error:', createErr && createErr.message ? createErr.message : createErr);
+    throw new Error('Google Drive upload failed: ' + (createErr && createErr.message ? createErr.message : String(createErr)));
+  }
 
-  const fileId = response.data.id;
+  const fileId = response && response.data ? response.data.id : null;
   if (!fileId) {
+    console.error('[Google Drive] Unexpected create response:', response && response.data ? response.data : response);
     throw new Error('Google Drive upload completed but no file ID was returned.');
   }
 
@@ -254,12 +265,16 @@ async function uploadToGoogleDrive(fileBuffer, originalName, mimeType, req) {
       }
     });
   } catch (permErr) {
-    console.warn('Google Drive permission create failed:', permErr.message);
+    console.warn('Google Drive permission create failed:', permErr && permErr.message ? permErr.message : permErr);
   }
+
+  const imageUrl = response.data.webContentLink || getGoogleDriveFileUrl(fileId);
+  const webView = response.data.webViewLink || '';
+  console.log(`[Google Drive] Created file: id=${fileId} webView=${webView} contentLink=${response.data.webContentLink || ''}`);
 
   return {
     fileId,
-    imageUrl: getGoogleDriveFileUrl(fileId)
+    imageUrl
   };
 }
 
@@ -442,7 +457,7 @@ async function processUploadTask(req) {
     throw new Error('Google Drive is not connected. Connect your Google account in Admin settings before uploading photos.');
   }
   if (!isFirebaseEnabled()) {
-    throw new Error('Firebase Firestore is not configured. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY before uploading.');
+    console.warn('Firebase is not configured. Photo metadata will be stored locally when possible.');
   }
 
   const uploadedBy = isAdmin ? 'admin' : (req.ip || req.headers['x-forwarded-for'] || 'anonymous');
@@ -754,7 +769,7 @@ app.post('/api/admin/settings', checkAdminAuth, async (req, res) => {
     settings.googleClientId = googleClientId.trim();
     cachedGoogleFolderId = '';
   }
-  if (googleClientSecret !== undefined && googleClientSecret !== '********') {
+  if (googleClientSecret !== undefined && googleClientSecret !== '********' && googleClientSecret.trim() !== '') {
     settings.googleClientSecret = googleClientSecret.trim();
     cachedGoogleFolderId = '';
   }

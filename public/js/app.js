@@ -483,7 +483,9 @@ async function startBatchUpload() {
     } else {
       item.status = 'failed';
       statusEl.className = 'preview-status failed';
-      statusEl.innerHTML = `<i class="fa-solid fa-xmark"></i> Server error`;
+      const errorMessage = res.error || 'Server error';
+      statusEl.innerHTML = `<i class="fa-solid fa-xmark"></i> ${errorMessage}`;
+      console.error('Upload failed:', errorMessage);
     }
 
     // Update progress bar
