@@ -1338,7 +1338,8 @@ async function startAdminBatchUpload() {
   let successCount = 0;
   if (progressBar) progressBar.style.width = '0%';
 
-  const uploadPromises = uploadable.map(async (item, i) => {
+  for (let i = 0; i < uploadable.length; i++) {
+    const item = uploadable[i];
     item.status = 'uploading';
     const statusEl = document.getElementById(`${item.id}-status`);
     if (statusEl) {
@@ -1380,7 +1381,7 @@ async function startAdminBatchUpload() {
             : 'Uploaded · no face detected';
           statusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${faceLabel}`;
         }
-        
+
         setTimeout(() => {
           const el = document.getElementById(item.id);
           if (el) el.remove();
@@ -1410,9 +1411,7 @@ async function startAdminBatchUpload() {
     const pct = Math.round((completedCount / uploadable.length) * 100);
     if (progressBar) progressBar.style.width = `${pct}%`;
     if (statusText) statusText.innerText = `Uploading images (${completedCount}/${uploadable.length})...`;
-  });
-
-  await Promise.all(uploadPromises);
+  }
 
   if (statusText) {
     statusText.innerHTML = `<span style='color:var(--success)'><i class='fa-solid fa-circle-check'></i> Successfully uploaded ${successCount}/${uploadable.length} photos!</span>`;

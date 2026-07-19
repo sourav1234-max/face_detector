@@ -476,7 +476,9 @@ async function startBatchUpload() {
     const item = uploadable[i];
     item.status = 'uploading';
     const statusEl = document.getElementById(`${item.id}-status`);
-    statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Computing face data...`;
+    if (statusEl) {
+      statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Computing face data...`;
+    }
 
     statusText.innerText = `Analyzing image ${i + 1}/${uploadable.length}...`;
 
@@ -484,25 +486,33 @@ async function startBatchUpload() {
     try {
       descriptors = await computeFaceDescriptors(item.file);
       if (descriptors.length === 0) {
-        statusEl.innerHTML = `<i class="fa-solid fa-circle-exclamation" style="color:#f59e0b"></i> No face detected`;
+        if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-circle-exclamation" style="color:#f59e0b"></i> No face detected`;
       } else {
-        statusEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face data ready`;
+        if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face data ready`;
       }
     } catch (err) {
       console.error('Descriptor computation failed for upload:', err);
       descriptors = [];
-      statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Face analysis failed`;
+      if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Face analysis failed`;
     }
 
     statusText.innerText = `Uploading image ${i + 1}/${uploadable.length}...`;
-    const res = await uploadPhoto(item.file, descriptors);
-    
-    if (res.success) {
+    let res = { success: false, error: 'Unknown error' };
+    try {
+      res = await uploadPhoto(item.file, descriptors);
+    } catch (uploadErr) {
+      console.error('Upload threw an exception:', uploadErr);
+      res = { success: false, error: uploadErr && uploadErr.message ? uploadErr.message : String(uploadErr) };
+    }
+
+    if (res && res.success) {
       successCount++;
       item.status = 'done';
-      statusEl.className = 'preview-status ready';
-      statusEl.innerHTML = `<i class="fa-solid fa-clock"></i> Uploaded`;
-      
+      if (statusEl) {
+        statusEl.className = 'preview-status ready';
+        statusEl.innerHTML = `<i class="fa-solid fa-clock"></i> Uploaded`;
+      }
+
       // Animate single removal from list
       setTimeout(() => {
         const el = document.getElementById(item.id);
@@ -516,10 +526,12 @@ async function startBatchUpload() {
       }, 1000);
     } else {
       item.status = 'failed';
-      statusEl.className = 'preview-status failed';
-      const errorMessage = res.error || 'Server error';
-      statusEl.innerHTML = `<i class="fa-solid fa-xmark"></i> ${errorMessage}`;
-      console.error('Upload failed:', errorMessage);
+      if (statusEl) {
+        statusEl.className = 'preview-status failed';
+        const errorMessage = (res && res.error) ? res.error : 'Server error';
+        statusEl.innerHTML = `<i class="fa-solid fa-xmark"></i> ${errorMessage}`;
+      }
+      console.error('Upload failed:', res && res.error ? res.error : res);
     }
 
     // Update progress bar
