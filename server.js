@@ -268,7 +268,7 @@ async function uploadToGoogleDrive(fileBuffer, originalName, mimeType, req) {
     console.warn('Google Drive permission create failed:', permErr && permErr.message ? permErr.message : permErr);
   }
 
-  const imageUrl = response.data.webContentLink || getGoogleDriveFileUrl(fileId);
+  const imageUrl = getGoogleDriveFileUrl(fileId);
   const webView = response.data.webViewLink || '';
   console.log(`[Google Drive] Created file: id=${fileId} webView=${webView} contentLink=${response.data.webContentLink || ''}`);
 
@@ -443,7 +443,7 @@ async function listGoogleDriveGalleryFiles(req) {
         id: `drive:${file.id}`,
         fileId: file.id,
         filename: `drive:${file.id}`,
-        imageUrl: file.webContentLink || getGoogleDriveFileUrl(file.id),
+        imageUrl: getGoogleDriveFileUrl(file.id),
         storageUrl: getGoogleDriveFileRoute(file.id),
         originalName: file.name,
         uploadTime: file.createdTime || file.modifiedTime || new Date().toISOString(),
