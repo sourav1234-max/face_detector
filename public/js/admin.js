@@ -26,6 +26,7 @@ async function loadFaceApiModels() {
   try {
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
+      faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath),
       faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
       faceapi.nets.faceRecognitionNet.loadFromUri(modelPath)
     ]);
@@ -35,6 +36,7 @@ async function loadFaceApiModels() {
     modelPath = CDN_MODEL_PATH;
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
+      faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath),
       faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
       faceapi.nets.faceRecognitionNet.loadFromUri(modelPath)
     ]);
