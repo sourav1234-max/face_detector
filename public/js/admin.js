@@ -336,6 +336,11 @@ async function loadDashboardData() {
         retentionInput.value = settingsRes.settings.photoRetentionHours !== undefined ? settingsRes.settings.photoRetentionHours : 0;
       }
 
+      const galleryHeadingInput = document.getElementById('gallery-heading-input');
+      if (galleryHeadingInput) {
+        galleryHeadingInput.value = settingsRes.settings.publicGalleryHeading || 'Gallery Catalog';
+      }
+
       // Update Google Drive controls & connection badges
       const statusBadge = document.getElementById('gdrive-status-badge');
       const connectedContainer = document.getElementById('gdrive-connected-container');
@@ -456,8 +461,14 @@ function renderModerationTable() {
 
   // Filter photos
   let filtered = window.allPhotos;
-  if (window.activeFilter !== 'all') {
-    filtered = window.allPhotos.filter(photo => photo.status === window.activeFilter);
+  if (window.activeFilter === 'pending') {
+    filtered = window.allPhotos.filter(photo => photo.status === 'pending');
+  } else if (window.activeFilter === 'approved') {
+    filtered = window.allPhotos.filter(photo => photo.status === 'approved');
+  } else if (window.activeFilter === 'rejected') {
+    filtered = window.allPhotos.filter(photo => photo.status === 'rejected');
+  } else if (window.activeFilter === 'no-face') {
+    filtered = window.allPhotos.filter(photo => !photo.descriptors || photo.descriptors.length === 0);
   }
 
   // Sort: pending first, then newest first
@@ -822,6 +833,27 @@ function setupSettingsEvents() {
     });
   }
 
+  const galleryHeadingInput = document.getElementById('gallery-heading-input');
+  if (galleryHeadingInput) {
+    galleryHeadingInput.addEventListener('change', async (e) => {
+      const heading = e.target.value.toString().trim();
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ publicGalleryHeading: heading })
+        });
+        if (!res.success) {
+          alert("Failed to update gallery heading: " + res.error);
+        }
+      } catch (err) {
+        console.error("Failed to update gallery heading:", err);
+      }
+    });
+  }
+
   // Google Credentials Save Event
   const saveCredsBtn = document.getElementById('gdrive-save-creds-btn');
   if (saveCredsBtn) {
@@ -1081,19 +1113,21 @@ function setupBulkActions() {
 
   if (bulkRejectBtn) {
     bulkRejectBtn.addEventListener('click', async () => {
-      const pendingPhotos = window.allPhotos.filter(p => p.status === 'pending');
-      if (pendingPhotos.length === 0) {
-        alert("No pending photos in the queue to reject.");
+      const targetPhotos = window.activeFilter === 'no-face'
+        ? window.allPhotos.filter(p => !p.descriptors || p.descriptors.length === 0)
+        : window.allPhotos.filter(p => p.status !== 'rejected');
+      if (targetPhotos.length === 0) {
+        alert("No photos available to reject.");
         return;
       }
-      if (confirm(`Are you sure you want to REJECT all ${pendingPhotos.length} pending photo(s)?`)) {
+      if (confirm(`Are you sure you want to REJECT all ${targetPhotos.length} selected photo(s)?`)) {
         try {
           const res = await adminFetch('/api/admin/bulk-status', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ status: 'rejected' })
+            body: JSON.stringify({ status: 'rejected', target: window.activeFilter === 'no-face' ? 'no-face' : 'all' })
           });
           if (res.success) {
             alert(`Successfully rejected ${res.updatedCount} photo(s).`);
@@ -1150,6 +1184,21 @@ let faceApiLoaded = true;
 
 async function initFaceApiForAdmin() {
   return true;
+}
+
+function promiseTimeout(promise, ms, onTimeout) {
+  let timeoutId;
+  const timeoutPromise = new Promise((resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      if (onTimeout) onTimeout();
+      reject(new Error('Face detection timed out after ' + ms / 1000 + ' seconds'));
+    }, ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+}
+
+async function computeFaceDescriptorsWithTimeout(source, ms = 60000) {
+  return await promiseTimeout(computeFaceDescriptors(source), ms);
 }
 
 window.adminUploadQueue = [];
@@ -1350,12 +1399,12 @@ async function startAdminBatchUpload() {
 
     let descriptors = [];
     try {
-      descriptors = await computeFaceDescriptors(item.file);
+      descriptors = await computeFaceDescriptorsWithTimeout(item.file, 60000);
       if (statusEl) {
         statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading (${descriptors.length} face${descriptors.length === 1 ? '' : 's'})...`;
       }
     } catch (faceErr) {
-      console.warn('Admin face detection failed for', item.file.name, faceErr);
+      console.warn('Admin face detection failed or timed out for', item.file.name, faceErr);
       if (statusEl) {
         statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading (no faces)...`;
       }

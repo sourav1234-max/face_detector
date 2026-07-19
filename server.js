@@ -462,11 +462,13 @@ async function listGoogleDriveGalleryFiles(req) {
 app.get('/api/gallery', async (req, res) => {
   try {
     const settings = await readSettings();
+    const galleryHeading = settings.publicGalleryHeading || 'Gallery Catalog';
     if (!settings.publicGalleryEnabled) {
       return res.json({
         success: true,
         photos: [],
         publicGalleryEnabled: false,
+        galleryHeading,
         logoWidth: settings.logoWidth,
         storageMode: getStorageMode(settings)
       });
@@ -490,6 +492,7 @@ app.get('/api/gallery', async (req, res) => {
       success: true,
       photos: publicPhotos,
       publicGalleryEnabled: true,
+      galleryHeading,
       logoWidth: settings.logoWidth,
       storageMode: getStorageMode(settings)
     });
@@ -601,9 +604,11 @@ app.post('/api/upload', upload.single('photo'), async (req, res) => {
 app.post('/api/search', async (req, res) => {
   try {
     const limit = req.body.threshold !== undefined ? parseFloat(req.body.threshold) : 0.55;
-    const queryDescriptor = req.body.descriptor || req.body.queryDescriptor;
+    const queryDescriptors = Array.isArray(req.body.descriptors)
+    ? req.body.descriptors
+    : (req.body.descriptor && Array.isArray(req.body.descriptor) ? [req.body.descriptor] : []);
 
-    if (!queryDescriptor || !Array.isArray(queryDescriptor)) {
+    if (!queryDescriptors || queryDescriptors.length === 0) {
       return res.status(400).json({ success: false, error: 'No face descriptor provided for search' });
     }
 
@@ -615,11 +620,14 @@ app.post('/api/search', async (req, res) => {
       if (!photo.descriptors || photo.descriptors.length === 0) return;
 
       let minDistance = 999;
-      photo.descriptors.forEach(faceData => {
-        const desc = Array.isArray(faceData) ? faceData : faceData.descriptor;
-        if (!desc || !Array.isArray(desc) || desc.length === 0) return;
-        const dist = getEuclideanDistance(queryDescriptor, desc);
-        if (dist < minDistance) minDistance = dist;
+      queryDescriptors.forEach(queryDescriptor => {
+        if (!queryDescriptor || !Array.isArray(queryDescriptor) || queryDescriptor.length === 0) return;
+        photo.descriptors.forEach(faceData => {
+          const desc = Array.isArray(faceData) ? faceData : faceData.descriptor;
+          if (!desc || !Array.isArray(desc) || desc.length === 0) return;
+          const dist = getEuclideanDistance(queryDescriptor, desc);
+          if (dist < minDistance) minDistance = dist;
+        });
       });
 
       if (minDistance <= limit) {
@@ -829,10 +837,11 @@ app.get('/api/admin/settings', checkAdminAuth, async (req, res) => {
 });
 
 app.post('/api/admin/settings', checkAdminAuth, async (req, res) => {
-  const { publicGalleryEnabled, newPassword, logoWidth, photoRetentionHours, googleClientId, googleClientSecret } = req.body;
+  const { publicGalleryEnabled, publicGalleryHeading, newPassword, logoWidth, photoRetentionHours, googleClientId, googleClientSecret } = req.body;
   const settings = await readSettings();
 
   if (publicGalleryEnabled !== undefined) settings.publicGalleryEnabled = !!publicGalleryEnabled;
+  if (publicGalleryHeading !== undefined) settings.publicGalleryHeading = publicGalleryHeading.toString().trim() || 'Gallery Catalog';
   if (newPassword && newPassword.trim() !== '') settings.adminPassword = newPassword.trim();
   if (logoWidth !== undefined) settings.logoWidth = parseInt(logoWidth, 10) || 245;
   if (photoRetentionHours !== undefined) settings.photoRetentionHours = parseFloat(photoRetentionHours);
@@ -895,7 +904,7 @@ app.post('/api/admin/update-visibility', checkAdminAuth, async (req, res) => {
 });
 
 app.post('/api/admin/bulk-status', checkAdminAuth, async (req, res) => {
-  const { status, ids } = req.body;
+  const { status, ids, target } = req.body;
   if (!status || !['approved', 'rejected'].includes(status)) {
     return res.status(400).json({ success: false, error: 'Invalid status value' });
   }
@@ -904,9 +913,16 @@ app.post('/api/admin/bulk-status', checkAdminAuth, async (req, res) => {
   let updatedCount = 0;
 
   for (const photo of gallery) {
-    const shouldUpdate = ids && Array.isArray(ids)
-      ? ids.includes(photo.id)
-      : photo.status === 'pending';
+    let shouldUpdate = false;
+    if (Array.isArray(ids) && ids.length > 0) {
+      shouldUpdate = ids.includes(photo.id);
+    } else if (target === 'no-face') {
+      shouldUpdate = !photo.descriptors || photo.descriptors.length === 0;
+    } else if (target === 'all') {
+      shouldUpdate = photo.status !== status;
+    } else {
+      shouldUpdate = photo.status === 'pending';
+    }
 
     if (shouldUpdate) {
       const patch = { status };

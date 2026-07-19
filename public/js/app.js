@@ -7,6 +7,7 @@ window.galleryCatalog = [];
 window.uploadQueue = [];
 window.queryDescriptor = null;
 window.searchQueryDescriptor = null;
+window.searchQueryDescriptors = [];
 window.webcamStream = null;
 window.isWebcamActive = false;
 window.faceApiLoaded = false;
@@ -137,6 +138,21 @@ async function computeFaceDescriptors(source) {
 
   return mapDetections(detections);
 }
+
+function promiseTimeout(promise, ms, onTimeout) {
+  let timeoutId;
+  const timeoutPromise = new Promise((resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      if (onTimeout) onTimeout();
+      reject(new Error('Face detection timed out after ' + ms / 1000 + ' seconds'));
+    }, ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+}
+
+async function computeFaceDescriptorsWithTimeout(source, ms = 60000) {
+  return await promiseTimeout(computeFaceDescriptors(source), ms);
+}
 // Limits to protect browser memory
 const MAX_UPLOAD_SIZE = 30 * 1024 * 1024; // 30 MB per file
 const MAX_UPLOAD_QUEUE = 20; // max files in client-side queue
@@ -188,8 +204,14 @@ async function fetchGallery() {
     if (result.success) {
       window.galleryCatalog = result.photos;
       window.publicGalleryEnabled = result.publicGalleryEnabled !== false;
+      window.galleryHeading = result.galleryHeading || 'Gallery Catalog';
       // reset pagination when gallery refreshes
       currentGalleryPage = 0;
+      
+      const headingEl = document.getElementById('gallery-catalog-heading');
+      if (headingEl) {
+        headingEl.innerText = window.galleryHeading;
+      }
       
       // Apply custom logo width if returned
       if (result.logoWidth) {
@@ -486,7 +508,7 @@ async function startBatchUpload() {
 
     let descriptors = [];
     try {
-      descriptors = await computeFaceDescriptors(item.file);
+      descriptors = await computeFaceDescriptorsWithTimeout(item.file, 60000);
       if (descriptors.length === 0) {
         if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-circle-exclamation" style="color:#f59e0b"></i> No face detected`;
       } else {
@@ -495,7 +517,7 @@ async function startBatchUpload() {
     } catch (err) {
       console.error('Descriptor computation failed for upload:', err);
       descriptors = [];
-      if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Face analysis failed`;
+      if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Timed out / no face data`;
     }
 
     statusText.innerText = `Uploading image ${i + 1}/${uploadable.length}...`;
@@ -560,6 +582,10 @@ function updateGalleryUI() {
   const totalCountEl = document.getElementById('gallery-total-count');
   const emptyState = document.getElementById('empty-gallery-state');
   const grid = document.getElementById('gallery-grid');
+  const headingEl = document.getElementById('gallery-catalog-heading');
+  if (headingEl) {
+    headingEl.innerText = window.galleryHeading || 'Gallery Catalog';
+  }
 
   totalCountEl.innerText = window.galleryCatalog.length;
   grid.innerHTML = '';
@@ -804,12 +830,17 @@ async function handleSearchFileSelected(file) {
 
       // Compute descriptors immediately
       try {
-        const descriptors = await computeFaceDescriptors(file);
+        const descriptors = await computeFaceDescriptorsWithTimeout(file, 60000);
+        window.searchQueryDescriptors = descriptors;
         window.searchQueryDescriptor = descriptors.length > 0 ? descriptors[0].descriptor : null;
-        if (!window.searchQueryDescriptor) {
+        if (descriptors.length === 0) {
           document.getElementById('feedback-title').innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Detected`;
           document.getElementById('feedback-desc').innerText = 'Please choose another photo with a clear face.';
           document.getElementById('execute-search-btn').classList.add('disabled');
+        } else if (descriptors.length > 1) {
+          document.getElementById('feedback-title').innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Multiple Faces Detected`;
+          document.getElementById('feedback-desc').innerText = `Ready to search the gallery using ${descriptors.length} face(s).`;
+          document.getElementById('execute-search-btn').classList.remove('disabled');
         } else {
           document.getElementById('feedback-title').innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face Detected`;
           document.getElementById('feedback-desc').innerText = 'Ready to search the gallery.';
@@ -941,17 +972,21 @@ async function captureCameraSearch() {
 
   try {
     const descriptors = await computeFaceDescriptors(base64Data);
-    window.searchQueryDescriptor = descriptors.length > 0 ? descriptors[0].descriptor : null;
-    if (!window.searchQueryDescriptor) {
-      feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Detected`;
-      feedbackDesc.innerText = 'Please capture another photo with a clear face.';
-      document.getElementById('execute-search-btn').classList.add('disabled');
-      return;
-    }
-    feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Captured!`;
-    feedbackDesc.innerText = 'Face detected, ready to search.';
-    document.getElementById('execute-search-btn').classList.remove('disabled');
-  } catch (faceErr) {
+      window.searchQueryDescriptors = descriptors;
+      window.searchQueryDescriptor = descriptors.length > 0 ? descriptors[0].descriptor : null;
+      if (descriptors.length === 0) {
+        feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Detected`;
+        feedbackDesc.innerText = 'Please capture another photo with a clear face.';
+        document.getElementById('execute-search-btn').classList.add('disabled');
+        return;
+      }
+      if (descriptors.length > 1) {
+        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Multiple Faces Detected`;
+        feedbackDesc.innerText = `Detected ${descriptors.length} face(s) and ready to search.`;
+      } else {
+        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Captured!`;
+        feedbackDesc.innerText = 'Face detected, ready to search.';
+      }
     console.error('Camera face detection error:', faceErr);
     feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Detection Failed`;
     feedbackDesc.innerText = faceErr.message;
@@ -988,7 +1023,7 @@ async function performSearch() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        descriptor: window.searchQueryDescriptor,
+        descriptors: window.searchQueryDescriptors,
         threshold: threshold
       })
     });
