@@ -941,6 +941,34 @@ function setupSettingsEvents() {
     });
   }
 
+  // Google Drive Sync Event
+  const gdriveSyncBtn = document.getElementById('gdrive-sync-btn');
+  if (gdriveSyncBtn) {
+    gdriveSyncBtn.addEventListener('click', async () => {
+      try {
+        gdriveSyncBtn.disabled = true;
+        gdriveSyncBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Syncing...';
+        
+        const res = await adminFetch('/api/admin/sync', {
+          method: 'POST'
+        });
+        
+        if (res.success) {
+          alert(`Google Drive synced successfully! Processed ${res.count} new photo(s).`);
+          await loadDashboardData();
+        } else {
+          alert("Sync failed: " + (res.error || 'Unknown error'));
+        }
+      } catch (err) {
+        console.error("Sync error:", err);
+        alert("Sync error: " + err.message);
+      } finally {
+        gdriveSyncBtn.disabled = false;
+        gdriveSyncBtn.innerHTML = '<i class="fa-solid fa-rotate"></i> Sync Google Drive Photos';
+      }
+    });
+  }
+
   // Google Disconnect Event
   const gdriveDisconnectBtn = document.getElementById('gdrive-disconnect-btn');
   if (gdriveDisconnectBtn) {
@@ -1439,26 +1467,13 @@ async function startAdminBatchUpload() {
     item.status = 'uploading';
     const statusEl = document.getElementById(`${item.id}-status`);
     if (statusEl) {
-      statusEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Detecting faces...`;
-    }
-
-    let descriptors = [];
-    try {
-      descriptors = await computeFaceDescriptorsWithTimeout(item.file, 60000);
-      if (statusEl) {
-        statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading (${descriptors.length} face${descriptors.length === 1 ? '' : 's'})...`;
-      }
-    } catch (faceErr) {
-      console.warn('Admin face detection failed or timed out for', item.file.name, faceErr);
-      if (statusEl) {
-        statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading (no faces)...`;
-      }
+      statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading...`;
     }
 
     const formData = new FormData();
     formData.append('photo', item.file);
     formData.append('isPublic', isPublicCheckbox ? isPublicCheckbox.checked : true);
-    formData.append('descriptors', JSON.stringify(descriptors));
+    formData.append('descriptors', JSON.stringify([]));
 
     try {
       const response = await fetch('/api/upload', {
@@ -1472,8 +1487,9 @@ async function startAdminBatchUpload() {
         item.status = 'done';
         if (statusEl) {
           statusEl.className = 'preview-status ready';
-          const faceLabel = descriptors.length > 0
-            ? `Uploaded · ${descriptors.length} face(s)`
+          const serverFaces = result.photo && result.photo.descriptors ? result.photo.descriptors.length : 0;
+          const faceLabel = serverFaces > 0
+            ? `Uploaded · ${serverFaces} face(s)`
             : 'Uploaded · no face detected';
           statusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${faceLabel}`;
         }

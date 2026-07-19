@@ -514,29 +514,13 @@ async function startBatchUpload() {
     item.status = 'uploading';
     const statusEl = document.getElementById(`${item.id}-status`);
     if (statusEl) {
-      statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Computing face data...`;
-    }
-
-    statusText.innerText = `Analyzing image ${i + 1}/${uploadable.length}...`;
-
-    let descriptors = [];
-    try {
-      descriptors = await computeFaceDescriptorsWithTimeout(item.file, 60000);
-      if (descriptors.length === 0) {
-        if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-circle-info" style="color:#a78bfa"></i> No face detected &mdash; uploading anyway`;
-      } else {
-        if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face data ready`;
-      }
-    } catch (err) {
-      console.error('Descriptor computation failed for upload:', err);
-      descriptors = [];
-      if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-circle-info" style="color:#a78bfa"></i> Face analysis skipped &mdash; uploading anyway`;
+      statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading...`;
     }
 
     statusText.innerText = `Uploading image ${i + 1}/${uploadable.length}...`;
     let res = { success: false, error: 'Unknown error' };
     try {
-      res = await uploadPhoto(item.file, descriptors);
+      res = await uploadPhoto(item.file, []);
     } catch (uploadErr) {
       console.error('Upload threw an exception:', uploadErr);
       res = { success: false, error: uploadErr && uploadErr.message ? uploadErr.message : String(uploadErr) };
