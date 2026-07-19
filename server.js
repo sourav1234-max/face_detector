@@ -665,6 +665,8 @@ app.get('/api/drive/photo/:fileId', async (req, res) => {
     if (response.headers['content-type']) {
       res.setHeader('Content-Type', response.headers['content-type']);
     }
+    // Force inline rendering for browser image previews.
+    res.setHeader('Content-Disposition', 'inline');
     response.data.pipe(res);
   } catch (err) {
     console.error('Error fetching file from Google Drive:', err.message);
