@@ -405,6 +405,60 @@ function getEuclideanDistance(a, b) {
 
 // --- Public APIs ---
 
+async function listGoogleDriveGalleryFiles(req) {
+  const settings = await readSettings();
+  if (!settings.googleRefreshToken) return [];
+  const oauth2Client = await createGoogleOAuthClient(req);
+  oauth2Client.setCredentials({ refresh_token: settings.googleRefreshToken });
+  const drive = google.drive({ version: 'v3', auth: oauth2Client });
+
+  let folderId = getConfiguredGoogleDriveFolderId() || cachedGoogleFolderId || '';
+  if (!folderId) {
+    const listRes = await drive.files.list({
+      q: `mimeType='application/vnd.google-apps.folder' and name='${DEFAULT_GOOGLE_DRIVE_FOLDER_NAME}' and trashed=false`,
+      fields: 'files(id)',
+      spaces: 'drive'
+    });
+    if (listRes.data.files.length > 0) {
+      folderId = listRes.data.files[0].id;
+      cachedGoogleFolderId = folderId;
+    } else {
+      return [];
+    }
+  }
+
+  const files = [];
+  let pageToken = null;
+  do {
+    const listRes = await drive.files.list({
+      q: `'${folderId}' in parents and trashed=false and mimeType contains 'image/'`,
+      fields: 'nextPageToken, files(id, name, createdTime, modifiedTime, mimeType, webContentLink)',
+      spaces: 'drive',
+      pageSize: 200,
+      pageToken
+    });
+    const pageFiles = listRes.data.files || [];
+    pageFiles.forEach(file => {
+      files.push({
+        id: `drive:${file.id}`,
+        fileId: file.id,
+        filename: `drive:${file.id}`,
+        imageUrl: file.webContentLink || getGoogleDriveFileUrl(file.id),
+        storageUrl: getGoogleDriveFileRoute(file.id),
+        originalName: file.name,
+        uploadTime: file.createdTime || file.modifiedTime || new Date().toISOString(),
+        timestamp: file.createdTime || file.modifiedTime || new Date().toISOString(),
+        descriptors: [],
+        status: 'approved',
+        isPublic: true
+      });
+    });
+    pageToken = listRes.data.nextPageToken;
+  } while (pageToken);
+
+  return files.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+}
+
 app.get('/api/gallery', async (req, res) => {
   try {
     const settings = await readSettings();
@@ -417,12 +471,21 @@ app.get('/api/gallery', async (req, res) => {
         storageMode: getStorageMode(settings)
       });
     }
+
     const gallery = await readGalleryDb();
-    const publicPhotos = gallery.filter(photo => {
+    let publicPhotos = gallery.filter(photo => {
       const status = photo.status === undefined ? 'approved' : photo.status;
       const isPublic = photo.isPublic === undefined ? true : photo.isPublic;
       return status === 'approved' && isPublic === true;
     });
+
+    if (publicPhotos.length === 0 && settings.googleRefreshToken) {
+      const drivePhotos = await listGoogleDriveGalleryFiles(req);
+      if (drivePhotos.length > 0) {
+        publicPhotos = drivePhotos;
+      }
+    }
+
     res.json({
       success: true,
       photos: publicPhotos,
