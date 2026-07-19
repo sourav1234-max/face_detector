@@ -576,9 +576,25 @@ async function startBatchUpload() {
 
     statusText.innerText = `Uploading image ${i + 1}/${uploadable.length}...`;
     let res = { success: false, error: 'Unknown error' };
+    let descriptors = [];
     try {
       const resizedFile = await resizeImageIfNeeded(item.file);
-      res = await uploadPhoto(resizedFile, []);
+      if (statusEl) {
+        statusEl.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting faces...`;
+      }
+      try {
+        if (window.faceApiLoaded) {
+          descriptors = await computeFaceDescriptorsWithTimeout(resizedFile, 10000);
+        } else {
+          console.log('Face-api models not loaded yet, offloading detection to server...');
+        }
+      } catch (faceErr) {
+        console.warn('Browser face detection failed or timed out during upload:', faceErr);
+      }
+      if (statusEl) {
+        statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading...`;
+      }
+      res = await uploadPhoto(resizedFile, descriptors);
     } catch (uploadErr) {
       console.error('Upload threw an exception:', uploadErr);
       res = { success: false, error: uploadErr && uploadErr.message ? uploadErr.message : String(uploadErr) };
@@ -589,7 +605,9 @@ async function startBatchUpload() {
       item.status = 'done';
       if (statusEl) {
         statusEl.className = 'preview-status ready';
-        statusEl.innerHTML = `<i class="fa-solid fa-clock"></i> Uploaded`;
+        const faceCount = descriptors.length;
+        const faceLabel = faceCount > 0 ? `${faceCount} face(s)` : 'no face';
+        statusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> Uploaded (${faceLabel})`;
       }
 
       // Animate single removal from list

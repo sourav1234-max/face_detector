@@ -68,6 +68,10 @@ def main():
                 except Exception as exc:
                     last_error = str(exc)
 
+            if not face_locations and last_error is not None:
+                print(json.dumps({"success": False, "error": f"Face detection models failed with exception: {last_error}"}))
+                return
+
             scale_x = orig_width / resized_width if resized else 1.0
             scale_y = orig_height / resized_height if resized else 1.0
 

@@ -861,24 +861,57 @@ let uploadProcessingQueue = Promise.resolve();
 const { execFile } = require('child_process');
 
 function runPythonFaceDetector(filePath) {
-  return new Promise((resolve, reject) => {
-    const pythonCmd = 'python';
-    const scriptPath = path.join(__dirname, 'detect_faces.py');
-    execFile(pythonCmd, [scriptPath, filePath], (error, stdout, stderr) => {
-      if (error) {
-        console.error('[Python Face Detector] error:', error);
-        console.error('[Python Face Detector] stderr:', stderr);
-        return reject(new Error(stderr || error.message));
-      }
-      try {
-        const result = JSON.parse(stdout);
-        resolve(result);
-      } catch (parseErr) {
-        console.error('[Python Face Detector] Failed to parse stdout:', stdout);
-        reject(new Error(`Failed to parse Python output: ${stdout}`));
+  const cmds = ['python', 'python3', 'py'];
+  
+  const tryPythonCommand = (index) => {
+    return new Promise((resolve, reject) => {
+      const cmd = cmds[index];
+      const scriptPath = path.join(__dirname, 'detect_faces.py');
+      execFile(cmd, [scriptPath, filePath], (error, stdout, stderr) => {
+        if (error) {
+          if (error.code === 'ENOENT' && index < cmds.length - 1) {
+            console.warn(`[Python Face Detector] '${cmd}' command not found, trying '${cmds[index + 1]}'...`);
+            return tryPythonCommand(index + 1).then(resolve, reject);
+          }
+          console.error(`[Python Face Detector] error with '${cmd}':`, error);
+          console.error(`[Python Face Detector] stderr:`, stderr);
+          return reject(new Error(stderr || error.message));
+        }
+        try {
+          const result = JSON.parse(stdout);
+          resolve(result);
+        } catch (parseErr) {
+          console.error(`[Python Face Detector] Failed to parse stdout from '${cmd}':`, stdout);
+          reject(new Error(`Failed to parse Python output: ${stdout}`));
+        }
+      });
+    });
+  };
+
+  return tryPythonCommand(0);
+}
+
+function verifyPythonSetup() {
+  const cmds = ['python', 'python3', 'py'];
+  const testScript = "import sys; import face_recognition; import PIL; import numpy; print('OK')";
+
+  const tryCheck = (index) => {
+    if (index >= cmds.length) {
+      console.warn('\x1b[33m[Startup Warning] No working Python installation with face_recognition library was found.\x1b[0m');
+      console.warn('\x1b[33mServer-side face detection fallback will NOT work. Please run "pip install -r requirements.txt".\x1b[0m');
+      return;
+    }
+    const cmd = cmds[index];
+    execFile(cmd, ['-c', testScript], (error, stdout, stderr) => {
+      if (!error && stdout.trim() === 'OK') {
+        console.log(`[Startup] Python setup verified successfully using '${cmd}' command.`);
+      } else {
+        tryCheck(index + 1);
       }
     });
-  });
+  };
+
+  tryCheck(0);
 }
 
 async function processUploadTask(req) {
@@ -915,6 +948,8 @@ async function processUploadTask(req) {
   const mimeType = req.file.mimetype || 'application/octet-stream';
   const originalFileName = req.file.originalname;
 
+  let faceDetectionError = null;
+
   // Run server-side face detection fallback if no descriptors provided
   if (!descriptors || descriptors.length === 0) {
     console.log(`[Upload] Running server-side face detection fallback for ${originalFileName}...`);
@@ -932,7 +967,8 @@ async function processUploadTask(req) {
           descriptors = detectResult.faces;
           console.log(`[Upload] Server-side detection found ${descriptors.length} face(s) in ${originalFileName}.`);
         } else {
-          console.warn(`[Upload] Server-side detection failed or returned no faces:`, detectResult ? detectResult.error : 'no response');
+          faceDetectionError = detectResult ? detectResult.error : 'No response from python detector';
+          console.warn(`[Upload] Server-side detection failed or returned no faces:`, faceDetectionError);
         }
       } finally {
         if (fs.existsSync(tempPath)) {
@@ -941,6 +977,7 @@ async function processUploadTask(req) {
       }
     } catch (detectErr) {
       console.error(`[Upload] Server-side face detection error:`, detectErr.message);
+      faceDetectionError = detectErr.message;
     }
   }
 
@@ -998,7 +1035,9 @@ async function processUploadTask(req) {
     descriptors,
     status: 'approved',
     isPublic: req.body.isPublic === 'false' || req.body.isPublic === false ? false : true,
-    faceDetectionStatus: descriptors.length > 0 ? 'Face Detected' : 'No Face Detected',
+    faceDetectionStatus: descriptors.length > 0 
+      ? 'Face Detected' 
+      : (faceDetectionError ? `Face Detection Error: ${faceDetectionError}` : 'No Face Detected'),
     faceDetected: descriptors.length > 0
   };
 
@@ -1529,6 +1568,7 @@ if (require.main === module) {
     console.log(` Local URL: http://localhost:${PORT}`);
     console.log(` Storage: ${isFirebaseEnabled() ? 'Firebase metadata' : 'Local metadata'} + Google Drive photos when connected`);
     console.log('==================================================');
+    verifyPythonSetup();
   });
 
   server.on('error', (err) => {

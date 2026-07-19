@@ -248,6 +248,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupBulkActions();
   setupDirectUpload();
 
+  // Preload face-api models for face detection on upload
+  loadFaceApiModels().catch(err => console.warn('Failed to preload face-api models:', err));
+
   document.getElementById('refresh-moderation-btn').addEventListener('click', loadDashboardData);
   document.getElementById('admin-logout-btn').addEventListener('click', logoutAdmin);
 
@@ -1524,15 +1527,30 @@ async function startAdminBatchUpload() {
     item.status = 'uploading';
     const statusEl = document.getElementById(`${item.id}-status`);
     if (statusEl) {
-      statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading...`;
+      statusEl.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting faces...`;
     }
-
-    const formData = new FormData();
-    formData.append('isPublic', isPublicCheckbox ? isPublicCheckbox.checked : true);
-    formData.append('descriptors', JSON.stringify([]));
 
     try {
       const resizedFile = await resizeImageIfNeeded(item.file);
+      
+      let descriptors = [];
+      try {
+        if (window.faceApiLoaded) {
+          descriptors = await computeFaceDescriptorsWithTimeout(resizedFile, 10000);
+        } else {
+          console.log('Face-api models not loaded yet, offloading detection to server...');
+        }
+      } catch (faceErr) {
+        console.warn('Browser face detection failed or timed out during admin upload:', faceErr);
+      }
+
+      if (statusEl) {
+        statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading...`;
+      }
+
+      const formData = new FormData();
+      formData.append('isPublic', isPublicCheckbox ? isPublicCheckbox.checked : true);
+      formData.append('descriptors', JSON.stringify(descriptors));
       formData.append('photo', resizedFile);
 
       const response = await fetch('/api/upload', {
