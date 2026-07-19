@@ -697,9 +697,109 @@ async function triggerSyncIfNeeded(req) {
     });
 }
 
+let lastLocalSyncTime = 0;
+let isLocalSyncing = false;
+
+async function syncLocalUploadsIfNeeded() {
+  const now = Date.now();
+  // Throttle syncs to once every 10 seconds to avoid too frequent disk scans
+  if (isLocalSyncing || (now - lastLocalSyncTime < 10000)) {
+    return;
+  }
+
+  isLocalSyncing = true;
+  try {
+    const uploadsDir = path.join(__dirname, 'public', 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      return;
+    }
+
+    const files = fs.readdirSync(uploadsDir);
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
+    const imageFiles = files.filter(file => {
+      const ext = path.extname(file).toLowerCase();
+      return imageExtensions.includes(ext);
+    });
+
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    const gallery = await readGalleryDb();
+    const existingFilenames = new Set(gallery.map(p => p.filename));
+
+    for (const file of imageFiles) {
+      // Check if already in database (using name match)
+      if (existingFilenames.has(file)) {
+        continue;
+      }
+
+      const filePath = path.join(uploadsDir, file);
+      console.log(`[Local Sync] Found new manual photo: ${file}. Running face detection...`);
+
+      try {
+        let descriptors = [];
+        let faceDetectionStatus = 'No Face Detected';
+        let faceDetected = false;
+
+        try {
+          const detectResult = await runPythonFaceDetector(filePath);
+          if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
+            descriptors = detectResult.faces;
+            if (descriptors.length > 0) {
+              faceDetectionStatus = 'Face Detected';
+              faceDetected = true;
+            }
+          }
+        } catch (detectErr) {
+          console.error(`[Local Sync] Face detection failed for ${file}:`, detectErr.message);
+        }
+
+        const photoId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const stats = fs.statSync(filePath);
+
+        // Map file extension to MIME type
+        const ext = path.extname(file).toLowerCase();
+        let mimeType = 'image/jpeg';
+        if (ext === '.png') mimeType = 'image/png';
+        else if (ext === '.webp') mimeType = 'image/webp';
+
+        const photoRecord = {
+          id: photoId,
+          filename: file,
+          originalName: file,
+          uploadedBy: 'manual_copy',
+          uploadTime: new Date(stats.mtime || Date.now()).toISOString(),
+          fileSize: stats.size || 0,
+          mimeType,
+          storageUrl: `/uploads/${file}`,
+          imageUrl: `/uploads/${file}`,
+          faceDetectionStatus,
+          faceDetected,
+          descriptors: descriptors.map(f => f.descriptor),
+          status: 'approved',
+          isPublic: true
+        };
+
+        await addPhoto(photoRecord);
+        console.log(`[Local Sync] Registered manual photo ${file} with ${descriptors.length} face(s).`);
+      } catch (err) {
+        console.error(`[Local Sync] Failed to register manual photo ${file}:`, err.message);
+      }
+    }
+
+    lastLocalSyncTime = Date.now();
+  } catch (err) {
+    console.error('[Local Sync] Error scanning uploads directory:', err.message);
+  } finally {
+    isLocalSyncing = false;
+  }
+}
+
 app.get('/api/gallery', async (req, res) => {
   try {
     triggerSyncIfNeeded(req).catch(err => console.error('[GDrive Sync] Trigger error:', err));
+    syncLocalUploadsIfNeeded().catch(err => console.error('[Local Sync] Trigger error:', err));
     const settings = await readSettings();
     const galleryHeading = settings.publicGalleryHeading || 'Gallery Catalog';
     if (!settings.publicGalleryEnabled) {

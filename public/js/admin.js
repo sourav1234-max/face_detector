@@ -17,6 +17,63 @@ const LOCAL_MODEL_PATH = '/models';
 const CDN_MODEL_PATH = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 let modelPath = LOCAL_MODEL_PATH;
 
+function resizeImageIfNeeded(file, maxDim = 2048) {
+  return new Promise((resolve) => {
+    if (!file || !file.type || !file.type.startsWith('image/')) {
+      return resolve(file);
+    }
+
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      img.onload = () => {
+        const width = img.width;
+        const height = img.height;
+
+        if (width <= maxDim && height <= maxDim) {
+          return resolve(file);
+        }
+
+        let newWidth = width;
+        let newHeight = height;
+        if (width > height) {
+          if (width > maxDim) {
+            newHeight = Math.round((height * maxDim) / width);
+            newWidth = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            newWidth = Math.round((width * maxDim) / height);
+            newHeight = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, newWidth, newHeight);
+
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            return resolve(file);
+          }
+          const resizedFile = new File([blob], file.name, {
+            type: 'image/jpeg',
+            lastModified: Date.now()
+          });
+          resolve(resizedFile);
+        }, 'image/jpeg', 0.85);
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
 async function loadFaceApiModels() {
   if (window.faceApiLoaded) return;
   if (typeof faceapi === 'undefined') {
@@ -1471,11 +1528,13 @@ async function startAdminBatchUpload() {
     }
 
     const formData = new FormData();
-    formData.append('photo', item.file);
     formData.append('isPublic', isPublicCheckbox ? isPublicCheckbox.checked : true);
     formData.append('descriptors', JSON.stringify([]));
 
     try {
+      const resizedFile = await resizeImageIfNeeded(item.file);
+      formData.append('photo', resizedFile);
+
       const response = await fetch('/api/upload', {
         method: 'POST',
         credentials: 'same-origin',

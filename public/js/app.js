@@ -64,6 +64,63 @@ function loadImageElement(source) {
   });
 }
 
+function resizeImageIfNeeded(file, maxDim = 2048) {
+  return new Promise((resolve) => {
+    if (!file || !file.type || !file.type.startsWith('image/')) {
+      return resolve(file);
+    }
+
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      img.onload = () => {
+        const width = img.width;
+        const height = img.height;
+
+        if (width <= maxDim && height <= maxDim) {
+          return resolve(file);
+        }
+
+        let newWidth = width;
+        let newHeight = height;
+        if (width > height) {
+          if (width > maxDim) {
+            newHeight = Math.round((height * maxDim) / width);
+            newWidth = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            newWidth = Math.round((width * maxDim) / height);
+            newHeight = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, newWidth, newHeight);
+
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            return resolve(file);
+          }
+          const resizedFile = new File([blob], file.name, {
+            type: 'image/jpeg',
+            lastModified: Date.now()
+          });
+          resolve(resizedFile);
+        }, 'image/jpeg', 0.85);
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
 function computeIoU(boxA, boxB) {
   const x1 = Math.max(boxA.left, boxB.left);
   const y1 = Math.max(boxA.top, boxB.top);
@@ -520,7 +577,8 @@ async function startBatchUpload() {
     statusText.innerText = `Uploading image ${i + 1}/${uploadable.length}...`;
     let res = { success: false, error: 'Unknown error' };
     try {
-      res = await uploadPhoto(item.file, []);
+      const resizedFile = await resizeImageIfNeeded(item.file);
+      res = await uploadPhoto(resizedFile, []);
     } catch (uploadErr) {
       console.error('Upload threw an exception:', uploadErr);
       res = { success: false, error: uploadErr && uploadErr.message ? uploadErr.message : String(uploadErr) };
@@ -788,7 +846,8 @@ async function detectFacesOnServer(fileOrBase64) {
     const blob = await fetch(fileOrBase64).then(r => r.blob());
     formData.append('photo', blob, 'webcam.jpg');
   } else {
-    formData.append('photo', fileOrBase64);
+    const resizedFile = await resizeImageIfNeeded(fileOrBase64);
+    formData.append('photo', resizedFile);
   }
 
   const response = await fetch('/api/detect-faces', {

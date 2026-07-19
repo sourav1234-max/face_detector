@@ -2,6 +2,7 @@ import sys
 import json
 import os
 from PIL import Image, ImageOps
+Image.MAX_IMAGE_PIXELS = None
 import numpy as np
 import face_recognition
 
@@ -41,12 +42,23 @@ def main():
             face_encodings = []
             last_error = None
 
-            # Try a more sensitive HOG pass first, then fallback to CNN if needed.
-            for model_name, kwargs in [
-                ("hog", {"number_of_times_to_upsample": 1}),
-                ("hog", {"number_of_times_to_upsample": 2}),
-                ("cnn", {}),
-            ]:
+            # Determine safe models to run based on image resolution.
+            # Upsampling large images causes memory exhaustion (std::bad_alloc).
+            max_dim = max(resized_width, resized_height)
+            
+            models_to_try = [
+                ("hog", {"number_of_times_to_upsample": 1})
+            ]
+            
+            if max_dim < 800:
+                models_to_try.append(("hog", {"number_of_times_to_upsample": 2}))
+            else:
+                models_to_try.append(("hog", {"number_of_times_to_upsample": 0}))
+                
+            if max_dim < 600:
+                models_to_try.append(("cnn", {}))
+
+            for model_name, kwargs in models_to_try:
                 try:
                     current_locations = face_recognition.face_locations(image_np, model=model_name, **kwargs)
                     if current_locations:
@@ -55,10 +67,6 @@ def main():
                         break
                 except Exception as exc:
                     last_error = str(exc)
-
-            if not face_locations:
-                face_locations = face_recognition.face_locations(image_np, model="hog", number_of_times_to_upsample=2)
-                face_encodings = face_recognition.face_encodings(image_np, face_locations)
 
             scale_x = orig_width / resized_width if resized else 1.0
             scale_y = orig_height / resized_height if resized else 1.0
