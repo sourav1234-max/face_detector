@@ -147,12 +147,12 @@ const GALLERY_PAGE_SIZE = 100; // images per page
 let currentGalleryPage = 0;
 
 function getPhotoUrl(filename, storageUrl, imageUrl) {
-  if (imageUrl) return imageUrl;
-  if (storageUrl) return storageUrl;
-  if (!filename) return '';
-  if (filename.startsWith('drive:')) {
+  if (filename && filename.startsWith('drive:')) {
     return `/api/drive/photo/${filename.split(':')[1]}`;
   }
+  if (storageUrl) return storageUrl;
+  if (imageUrl) return imageUrl;
+  if (!filename) return '';
   if (filename.startsWith('firebase:')) {
     const storagePath = filename.slice('firebase:'.length);
     return `/api/storage/photo?path=${encodeURIComponent(storagePath)}`;
