@@ -657,19 +657,21 @@ app.get('/api/drive/photo/:fileId', async (req, res) => {
     oauth2Client.setCredentials({ refresh_token: settings.googleRefreshToken });
     const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
+    const metaResponse = await drive.files.get({ fileId: req.params.fileId, fields: 'mimeType' });
     const response = await drive.files.get(
       { fileId: req.params.fileId, alt: 'media' },
       { responseType: 'stream' }
     );
 
-    if (response.headers['content-type']) {
-      res.setHeader('Content-Type', response.headers['content-type']);
-    }
-    // Force inline rendering for browser image previews.
+    const contentType = (response.headers && response.headers['content-type'])
+      || (metaResponse && metaResponse.data && metaResponse.data.mimeType)
+      || 'application/octet-stream';
+
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', 'inline');
     response.data.pipe(res);
   } catch (err) {
-    console.error('Error fetching file from Google Drive:', err.message);
+    console.error('Error fetching file from Google Drive:', err.message || err);
     res.status(500).send('Error loading image.');
   }
 });
