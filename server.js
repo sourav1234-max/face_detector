@@ -506,6 +506,29 @@ app.get('/api/gallery', async (req, res) => {
 
 let uploadProcessingQueue = Promise.resolve();
 
+const { execFile } = require('child_process');
+
+function runPythonFaceDetector(filePath) {
+  return new Promise((resolve, reject) => {
+    const pythonCmd = 'python';
+    const scriptPath = path.join(__dirname, 'detect_faces.py');
+    execFile(pythonCmd, [scriptPath, filePath], (error, stdout, stderr) => {
+      if (error) {
+        console.error('[Python Face Detector] error:', error);
+        console.error('[Python Face Detector] stderr:', stderr);
+        return reject(new Error(stderr || error.message));
+      }
+      try {
+        const result = JSON.parse(stdout);
+        resolve(result);
+      } catch (parseErr) {
+        console.error('[Python Face Detector] Failed to parse stdout:', stdout);
+        reject(new Error(`Failed to parse Python output: ${stdout}`));
+      }
+    });
+  });
+}
+
 async function processUploadTask(req) {
   const settings = await readSettings();
   const isAdmin = await isValidAdminSession(req);
@@ -525,9 +548,11 @@ async function processUploadTask(req) {
     }
   }
 
-  if (!settings.googleRefreshToken) {
+  const storageMode = getStorageMode(settings);
+  if (storageMode.includes('drive') && !settings.googleRefreshToken) {
     throw new Error('Google Drive is not connected. Connect your Google account in Admin settings before uploading photos.');
   }
+
   if (!isFirebaseEnabled()) {
     console.warn('Firebase is not configured. Photo metadata will be stored locally when possible.');
   }
@@ -538,17 +563,72 @@ async function processUploadTask(req) {
   const mimeType = req.file.mimetype || 'application/octet-stream';
   const originalFileName = req.file.originalname;
 
+  // Run server-side face detection fallback if no descriptors provided
+  if (!descriptors || descriptors.length === 0) {
+    console.log(`[Upload] Running server-side face detection fallback for ${originalFileName}...`);
+    try {
+      const tempDir = path.join(__dirname, 'scratch');
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      const tempPath = path.join(tempDir, `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${ext}`);
+      fs.writeFileSync(tempPath, buffer);
+
+      try {
+        const detectResult = await runPythonFaceDetector(tempPath);
+        if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
+          descriptors = detectResult.faces;
+          console.log(`[Upload] Server-side detection found ${descriptors.length} face(s) in ${originalFileName}.`);
+        } else {
+          console.warn(`[Upload] Server-side detection failed or returned no faces:`, detectResult ? detectResult.error : 'no response');
+        }
+      } finally {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      }
+    } catch (detectErr) {
+      console.error(`[Upload] Server-side face detection error:`, detectErr.message);
+    }
+  }
+
   let fileId;
   let filename;
   let storageUrl = '';
+  let imageUrl = '';
 
-  console.log(`[Google Drive] Uploading ${originalFileName}...`);
-  const driveUpload = await uploadToGoogleDrive(buffer, originalFileName, mimeType, req);
-  fileId = driveUpload.fileId;
-  filename = `drive:${fileId}`;
-  storageUrl = getGoogleDriveFileRoute(fileId);
-  const imageUrl = driveUpload.imageUrl || getGoogleDriveFileUrl(fileId);
-  console.log(`[Google Drive] Upload completed. File ID: ${fileId} URL: ${imageUrl}`);
+  if (storageMode.includes('drive')) {
+    console.log(`[Google Drive] Uploading ${originalFileName}...`);
+    const driveUpload = await uploadToGoogleDrive(buffer, originalFileName, mimeType, req);
+    fileId = driveUpload.fileId;
+    filename = `drive:${fileId}`;
+    storageUrl = getGoogleDriveFileRoute(fileId);
+    imageUrl = driveUpload.imageUrl || getGoogleDriveFileUrl(fileId);
+    console.log(`[Google Drive] Upload completed. File ID: ${fileId} URL: ${imageUrl}`);
+  } else if (storageMode === 'firebase') {
+    console.log(`[Firebase Storage] Uploading ${originalFileName}...`);
+    const destPath = `photos/${photoId}${ext}`;
+    const firebaseUpload = await uploadToFirebaseStorage(buffer, destPath, mimeType);
+    fileId = photoId;
+    filename = `firebase:${destPath}`;
+    storageUrl = firebaseUpload.url;
+    imageUrl = firebaseUpload.url;
+    console.log(`[Firebase Storage] Upload completed. Path: ${destPath}`);
+  } else {
+    console.log(`[Local Storage] Saving ${originalFileName}...`);
+    const destName = `${photoId}${ext}`;
+    const destPath = path.join(__dirname, 'public', 'uploads', destName);
+    const destDir = path.join(__dirname, 'public', 'uploads');
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+    fs.writeFileSync(destPath, buffer);
+    fileId = photoId;
+    filename = destName;
+    storageUrl = `/uploads/${destName}`;
+    imageUrl = `/uploads/${destName}`;
+    console.log(`[Local Storage] Save completed: ${destName}`);
+  }
 
   const newPhoto = {
     id: photoId,
@@ -565,7 +645,8 @@ async function processUploadTask(req) {
     timestamp: uploadTime,
     descriptors,
     status: 'approved',
-    isPublic: req.body.isPublic === 'false' || req.body.isPublic === false ? false : true
+    isPublic: req.body.isPublic === 'false' || req.body.isPublic === false ? false : true,
+    faceDetectionStatus: descriptors.length > 0 ? 'Face Detected' : 'No Face Detected'
   };
 
   try {
@@ -599,6 +680,35 @@ app.post('/api/upload', upload.single('photo'), async (req, res) => {
     res.json({ success: true, photo: newPhoto });
   } catch (err) {
     console.error('Upload endpoint error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/detect-faces', upload.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No image file uploaded' });
+    }
+
+    const buffer = req.file.buffer;
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+    const tempDir = path.join(__dirname, 'scratch');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    const tempPath = path.join(tempDir, `detect_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${ext}`);
+    fs.writeFileSync(tempPath, buffer);
+
+    try {
+      const result = await runPythonFaceDetector(tempPath);
+      res.json(result);
+    } finally {
+      if (fs.existsSync(tempPath)) {
+        fs.unlinkSync(tempPath);
+      }
+    }
+  } catch (err) {
+    console.error('Server-side face detection error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

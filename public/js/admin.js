@@ -51,12 +51,12 @@ function loadImageElement(source) {
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('Could not load image for face detection.'));
     if (source instanceof File || source instanceof Blob) {
-      const objectUrl = URL.createObjectURL(source);
-      img.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-        resolve(img);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.src = e.target.result;
       };
-      img.src = objectUrl;
+      reader.onerror = () => reject(new Error('Failed to read file.'));
+      reader.readAsDataURL(source);
     } else {
       img.src = source;
     }
@@ -1085,7 +1085,7 @@ function updateLightboxDetails(photo) {
   document.getElementById('detail-date').innerText = new Date(photo.timestamp).toLocaleString();
 
   const facesCount = photo.descriptors ? photo.descriptors.length : 0;
-  document.getElementById('detail-faces').innerText = `${facesCount} face(s) identified`;
+  document.getElementById('detail-faces').innerText = facesCount > 0 ? `${facesCount} face(s) identified` : 'No Face Detected';
 
   const statusEl = document.getElementById('detail-status');
   statusEl.innerText = photo.status;

@@ -52,12 +52,12 @@ function loadImageElement(source) {
     if (typeof source === 'string') {
       img.src = source;
     } else if (source instanceof File || source instanceof Blob) {
-      const objectUrl = URL.createObjectURL(source);
-      img.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-        resolve(img);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.src = e.target.result;
       };
-      img.src = objectUrl;
+      reader.onerror = () => reject(new Error('Failed to read file.'));
+      reader.readAsDataURL(source);
     } else {
       reject(new Error('Unsupported image source type for face detection.'));
     }
@@ -798,6 +798,28 @@ function setupSearchTabEvents() {
 }
 
 // Search file selection
+async function detectFacesOnServer(fileOrBase64) {
+  const formData = new FormData();
+  if (typeof fileOrBase64 === 'string') {
+    const blob = await fetch(fileOrBase64).then(r => r.blob());
+    formData.append('photo', blob, 'webcam.jpg');
+  } else {
+    formData.append('photo', fileOrBase64);
+  }
+
+  const response = await fetch('/api/detect-faces', {
+    method: 'POST',
+    body: formData
+  });
+  const result = await response.json();
+  if (result.success) {
+    return result.faces || [];
+  } else {
+    throw new Error(result.error || 'Server face detection failed');
+  }
+}
+
+// Search file selection
 async function handleSearchFileSelected(file) {
   const prompt = document.getElementById('search-upload-prompt');
   const previewContainer = document.getElementById('search-preview-container');
@@ -815,8 +837,8 @@ async function handleSearchFileSelected(file) {
   previewContainer.classList.remove('hidden');
   feedbackCard.classList.remove('hidden');
 
-  feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Photo Loaded`;
-  feedbackDesc.innerText = "Click 'Search Gallery' to find matches.";
+  feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing Photo...`;
+  feedbackDesc.innerText = "Preparing image...";
 
   try {
     // Render on canvas
@@ -841,29 +863,41 @@ async function handleSearchFileSelected(file) {
       // clear stored object url since it's revoked
       window.searchQueryObjectUrl = null;
 
+      let descriptors = [];
       // Compute descriptors immediately
       try {
-        const descriptors = await computeFaceDescriptorsWithTimeout(file, 60000);
-        window.searchQueryDescriptors = descriptors;
-        window.searchQueryDescriptor = descriptors.length > 0 ? descriptors[0].descriptor : null;
-        if (descriptors.length === 0) {
-          document.getElementById('feedback-title').innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Detected`;
-          document.getElementById('feedback-desc').innerText = 'Please choose another photo with a clear face.';
-          document.getElementById('execute-search-btn').classList.add('disabled');
-        } else if (descriptors.length > 1) {
-          document.getElementById('feedback-title').innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Multiple Faces Detected`;
-          document.getElementById('feedback-desc').innerText = `Ready to search the gallery using ${descriptors.length} face(s).`;
-          document.getElementById('execute-search-btn').classList.remove('disabled');
-        } else {
-          document.getElementById('feedback-title').innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face Detected`;
-          document.getElementById('feedback-desc').innerText = 'Ready to search the gallery.';
-          document.getElementById('execute-search-btn').classList.remove('disabled');
-        }
+        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting face (browser)...`;
+        feedbackDesc.innerText = 'Running face-api.js in your browser...';
+        descriptors = await computeFaceDescriptorsWithTimeout(file, 20000);
       } catch (faceErr) {
-        console.error('Face detection error:', faceErr);
-        document.getElementById('feedback-title').innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Detection Failed`;
-        document.getElementById('feedback-desc').innerText = faceErr.message;
-        document.getElementById('execute-search-btn').classList.add('disabled');
+        console.warn('Browser face detection failed/timed out, trying server-side...', faceErr);
+      }
+
+      if (!descriptors || descriptors.length === 0) {
+        try {
+          feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting face (server)...`;
+          feedbackDesc.innerText = 'Running robust server-side face detector...';
+          descriptors = await detectFacesOnServer(file);
+        } catch (serverErr) {
+          console.error('Server face detection failed:', serverErr);
+        }
+      }
+
+      window.searchQueryDescriptors = descriptors;
+      window.searchQueryDescriptor = descriptors && descriptors.length > 0 ? descriptors[0].descriptor : null;
+
+      if (!descriptors || descriptors.length === 0) {
+        feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Detected`;
+        feedbackDesc.innerText = 'We could not detect any face in this image on the browser or server. Please choose a different photo.';
+        searchBtn.classList.add('disabled');
+      } else {
+        const faceCount = descriptors.length;
+        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face${faceCount > 1 ? 's' : ''} Detected`;
+        feedbackDesc.innerText = `Ready to search the gallery using ${faceCount} face(s) (detected via server/browser).`;
+        searchBtn.classList.remove('disabled');
+        
+        // Auto-run search for best user experience
+        performSearch();
       }
     };
     img.src = url;
@@ -975,39 +1009,50 @@ async function captureCameraSearch() {
 
     const base64Data = tempCanvas.toDataURL('image/jpeg');
     window.searchQueryImage = base64Data;
-  document.getElementById('search-file-input').value = '';
-  document.getElementById('search-upload-prompt').classList.add('hidden');
-  document.getElementById('search-preview-container').classList.remove('hidden');
+    document.getElementById('search-file-input').value = '';
+    document.getElementById('search-upload-prompt').classList.add('hidden');
+    document.getElementById('search-preview-container').classList.remove('hidden');
 
-  canvas.width = tempCanvas.width;
-  canvas.height = tempCanvas.height;
-  canvas.getContext('2d').drawImage(tempCanvas, 0, 0);
+    canvas.width = tempCanvas.width;
+    canvas.height = tempCanvas.height;
+    canvas.getContext('2d').drawImage(tempCanvas, 0, 0);
 
-  try {
-    const descriptors = await computeFaceDescriptors(base64Data);
-      window.searchQueryDescriptors = descriptors;
-      window.searchQueryDescriptor = descriptors.length > 0 ? descriptors[0].descriptor : null;
-      if (descriptors.length === 0) {
-        feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Detected`;
-        feedbackDesc.innerText = 'Please capture another photo with a clear face.';
-        document.getElementById('execute-search-btn').classList.add('disabled');
-        return;
+    let descriptors = [];
+    try {
+      feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting face (browser)...`;
+      feedbackDesc.innerText = 'Running face-api.js in your browser...';
+      descriptors = await computeFaceDescriptors(base64Data);
+    } catch (faceErr) {
+      console.warn('Browser webcam face detection failed, trying server-side...', faceErr);
+    }
+
+    if (!descriptors || descriptors.length === 0) {
+      try {
+        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting face (server)...`;
+        feedbackDesc.innerText = 'Running robust server-side face detector...';
+        descriptors = await detectFacesOnServer(base64Data);
+      } catch (serverErr) {
+        console.error('Server-side webcam face detection failed:', serverErr);
       }
-      if (descriptors.length > 1) {
-        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Multiple Faces Detected`;
-        feedbackDesc.innerText = `Detected ${descriptors.length} face(s) and ready to search.`;
-      } else {
-        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Captured!`;
-        feedbackDesc.innerText = 'Face detected, ready to search.';
-      }
-    console.error('Camera face detection error:', faceErr);
-    feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Detection Failed`;
-    feedbackDesc.innerText = faceErr.message;
-    document.getElementById('execute-search-btn').classList.add('disabled');
-    return;
-  }
+    }
 
-  // Automatically perform search if descriptor computed
+    window.searchQueryDescriptors = descriptors;
+    window.searchQueryDescriptor = descriptors && descriptors.length > 0 ? descriptors[0].descriptor : null;
+
+    if (!descriptors || descriptors.length === 0) {
+      feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Detected`;
+      feedbackDesc.innerText = 'Please capture another photo with a clear face.';
+      document.getElementById('execute-search-btn').classList.add('disabled');
+      return;
+    }
+
+    const faceCount = descriptors.length;
+    feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Captured!`;
+    feedbackDesc.innerText = `Detected ${faceCount} face(s), searching gallery...`;
+    document.getElementById('execute-search-btn').classList.remove('disabled');
+
+    // Automatically perform search
+    performSearch();
   } catch (err) {
     console.error("Camera capture search error:", err);
     feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Error`;
@@ -1202,7 +1247,7 @@ function openLightbox(photo) {
   });
 
   const facesCount = photo.descriptors ? photo.descriptors.length : 0;
-  faces.innerText = `${facesCount} face(s) identified`;
+  faces.innerText = facesCount > 0 ? `${facesCount} face(s) identified` : 'No Face Detected';
 
   downloadLink.href = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
   downloadLink.setAttribute('download', photo.originalName);
