@@ -154,7 +154,7 @@ async function computeFaceDescriptorsWithTimeout(source, ms = 60000) {
   return await promiseTimeout(computeFaceDescriptors(source), ms);
 }
 // Limits to protect browser memory
-const MAX_UPLOAD_SIZE = 30 * 1024 * 1024; // 30 MB per file
+const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB per file
 const MAX_UPLOAD_QUEUE = 20; // max files in client-side queue
 const MAX_ZIP_DOWNLOAD = 20; // max images to bundle client-side
 // Gallery refresh settings
@@ -218,6 +218,19 @@ async function fetchGallery() {
         const logoImg = document.querySelector('.logo-area img');
         if (logoImg) {
           logoImg.style.width = result.logoWidth + 'px';
+        }
+      }
+
+      // Show/hide gallery announcement banner
+      const banner = document.getElementById('gallery-announcement-banner');
+      const bannerText = document.getElementById('gallery-announcement-text');
+      if (banner && bannerText) {
+        const msg = (result.galleryMessage || '').trim();
+        if (msg) {
+          bannerText.textContent = msg;
+          banner.style.display = 'block';
+        } else {
+          banner.style.display = 'none';
         }
       }
       
@@ -380,7 +393,7 @@ async function handleFilesAdded(fileList) {
     const file = fileList[i];
     // Reject files bigger than the configured limit
     if (file.size > MAX_UPLOAD_SIZE) {
-      alert(file.name + " is too large. Please select files up to 30 MB.");
+      alert(file.name + " is too large. Please select files up to 50 MB.");
       continue;
     }
 
@@ -510,14 +523,14 @@ async function startBatchUpload() {
     try {
       descriptors = await computeFaceDescriptorsWithTimeout(item.file, 60000);
       if (descriptors.length === 0) {
-        if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-circle-exclamation" style="color:#f59e0b"></i> No face detected`;
+        if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-circle-info" style="color:#a78bfa"></i> No face detected &mdash; uploading anyway`;
       } else {
         if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face data ready`;
       }
     } catch (err) {
       console.error('Descriptor computation failed for upload:', err);
       descriptors = [];
-      if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Timed out / no face data`;
+      if (statusEl) statusEl.innerHTML = `<i class="fa-solid fa-circle-info" style="color:#a78bfa"></i> Face analysis skipped &mdash; uploading anyway`;
     }
 
     statusText.innerText = `Uploading image ${i + 1}/${uploadable.length}...`;

@@ -8,7 +8,7 @@ window.activeFilter = 'all';
 window.selectedPhotoForLightbox = null;
 window.faceApiLoaded = false;
 // Admin-side limits to prevent memory issues
-const ADMIN_MAX_UPLOAD_SIZE = 30 * 1024 * 1024; // 30 MB
+const ADMIN_MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB
 const ADMIN_MAX_UPLOAD_QUEUE = 50; // max files admin can queue
 const ADMIN_MOD_TABLE_PAGE_SIZE = 12; // rows per moderation page (reduced to avoid memory spikes)
 let adminModCurrentPage = 0;
@@ -407,6 +407,12 @@ async function loadDashboardData() {
       window.allPhotos = photosRes.photos || [];
       updateStatsAndRender();
     }
+
+    // 3. Load gallery message
+    const galleryMsgInput = document.getElementById('gallery-message-input');
+    if (galleryMsgInput && settingsRes && settingsRes.settings) {
+      galleryMsgInput.value = settingsRes.settings.galleryMessage || '';
+    }
   } catch (err) {
     console.error("Failed to load dashboard data:", err);
   }
@@ -419,20 +425,36 @@ function updateStatsAndRender() {
   const pendingCount = photos.filter(p => p.status === 'pending').length;
   const approvedCount = photos.filter(p => p.status === 'approved').length;
   const rejectedCount = photos.filter(p => p.status === 'rejected').length;
+  const noFaceCount = photos.filter(p => !p.descriptors || p.descriptors.length === 0).length;
 
   // Render stats counters
   document.getElementById('stat-total').innerText = totalCount;
   document.getElementById('stat-pending').innerText = pendingCount;
   document.getElementById('stat-approved').innerText = approvedCount;
   document.getElementById('stat-rejected').innerText = rejectedCount;
+  const noFaceEl = document.getElementById('stat-no-face');
+  if (noFaceEl) noFaceEl.innerText = noFaceCount;
 
   // Render Tab Pending Badge count
   const badgeEl = document.getElementById('badge-pending-count');
-  if (pendingCount > 0) {
-    badgeEl.innerText = pendingCount;
-    badgeEl.style.display = 'inline-block';
-  } else {
-    badgeEl.style.display = 'none';
+  if (badgeEl) {
+    if (pendingCount > 0) {
+      badgeEl.innerText = pendingCount;
+      badgeEl.style.display = 'inline-block';
+    } else {
+      badgeEl.style.display = 'none';
+    }
+  }
+
+  // Render Tab No Face Badge count
+  const noFaceBadgeEl = document.getElementById('badge-no-face-count');
+  if (noFaceBadgeEl) {
+    if (noFaceCount > 0) {
+      noFaceBadgeEl.innerText = noFaceCount;
+      noFaceBadgeEl.style.display = 'inline-block';
+    } else {
+      noFaceBadgeEl.style.display = 'none';
+    }
   }
 
   renderModerationTable();
@@ -656,10 +678,6 @@ window.togglePhotoVisibility = async function (id, isPublic) {
 };
 
 window.deletePhotoPermanently = async function (id) {
-  if (!confirm("Are you sure you want to delete this photo permanently? This will remove the image file and delete all facial descriptors from the server. This action is irreversible.")) {
-    return;
-  }
-
   try {
     const res = await adminFetch('/api/delete', {
       method: 'POST',
@@ -942,6 +960,33 @@ function setupSettingsEvents() {
         }
       } catch (err) {
         console.error("Disconnect error:", err);
+      }
+    });
+  }
+
+  // Gallery Announcement Message Save
+  const saveGalleryMsgBtn = document.getElementById('save-gallery-message-btn');
+  if (saveGalleryMsgBtn) {
+    saveGalleryMsgBtn.addEventListener('click', async () => {
+      const galleryMsgInput = document.getElementById('gallery-message-input');
+      const savedIndicator = document.getElementById('gallery-message-saved-indicator');
+      const message = galleryMsgInput ? galleryMsgInput.value : '';
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ galleryMessage: message })
+        });
+        if (res.success) {
+          if (savedIndicator) {
+            savedIndicator.style.display = 'block';
+            setTimeout(() => { savedIndicator.style.display = 'none'; }, 3000);
+          }
+        } else {
+          alert('Failed to save announcement: ' + res.error);
+        }
+      } catch (err) {
+        console.error('Gallery message save error:', err);
       }
     });
   }
@@ -1263,7 +1308,7 @@ async function handleAdminFilesAdded(fileList) {
     const file = fileList[i];
     // Reject files bigger than limit
     if (file.size > ADMIN_MAX_UPLOAD_SIZE) {
-      alert(file.name + " is too large. Please select files up to 30 MB.");
+      alert(file.name + " is too large. Please select files up to 50 MB.");
       continue;
     }
 

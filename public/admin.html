@@ -411,6 +411,10 @@
                 <span class="stat-label">Rejected</span>
                 <div class="stat-val" id="stat-rejected">0</div>
               </div>
+              <div class="stat-card" style="grid-column: span 2;">
+                <span class="stat-label" style="color: var(--text-muted);"><i class="fa-solid fa-face-frown" style="margin-right:4px;"></i>No Face Detected</span>
+                <div class="stat-val" id="stat-no-face" style="color: #a78bfa; font-size: 22px;">0</div>
+              </div>
             </div>
           </div>
 
@@ -533,8 +537,27 @@
           <div class="panel-card">
             <div class="card-header">
               <h2>Global Configurations</h2>
-              <p>Configure visibility settings & credentials</p>
+              <p>Configure visibility settings &amp; credentials</p>
             </div>
+
+            <!-- Gallery Announcement Message -->
+            <div style="margin-bottom: 16px;">
+              <h3 style="font-size:14px; font-family:var(--font-display); margin-bottom:8px; color:#fff;">
+                <i class="fa-solid fa-bullhorn" style="color: var(--primary); margin-right: 6px;"></i>Gallery Catalog Announcement
+              </h3>
+              <p style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.5;">This message appears at the top of the public gallery for all visitors.</p>
+              <textarea id="gallery-message-input" class="form-input" rows="3"
+                placeholder="e.g. Welcome to our Photo Gallery! All photos from the event are available here."
+                style="resize:vertical; min-height: 70px; font-size: 13px; line-height: 1.5;"></textarea>
+              <button type="button" id="save-gallery-message-btn" class="btn btn-primary btn-block btn-sm" style="margin-top: 8px; font-size: 12px;">
+                <i class="fa-solid fa-floppy-disk"></i> Save Announcement
+              </button>
+              <div id="gallery-message-saved-indicator" style="display:none; margin-top:6px; font-size:11px; color:var(--success); text-align:center;">
+                <i class="fa-solid fa-circle-check"></i> Announcement saved!
+              </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.05); margin: 16px 0;">
 
             <!-- Public Gallery catalog Toggle -->
             <div class="switch-container">

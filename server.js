@@ -470,7 +470,8 @@ app.get('/api/gallery', async (req, res) => {
         publicGalleryEnabled: false,
         galleryHeading,
         logoWidth: settings.logoWidth,
-        storageMode: getStorageMode(settings)
+        storageMode: getStorageMode(settings),
+        galleryMessage: settings.galleryMessage || ''
       });
     }
 
@@ -494,7 +495,8 @@ app.get('/api/gallery', async (req, res) => {
       publicGalleryEnabled: true,
       galleryHeading,
       logoWidth: settings.logoWidth,
-      storageMode: getStorageMode(settings)
+      storageMode: getStorageMode(settings),
+      galleryMessage: settings.galleryMessage || ''
     });
   } catch (err) {
     console.error('Gallery endpoint error:', err);
@@ -837,7 +839,7 @@ app.get('/api/admin/settings', checkAdminAuth, async (req, res) => {
 });
 
 app.post('/api/admin/settings', checkAdminAuth, async (req, res) => {
-  const { publicGalleryEnabled, publicGalleryHeading, newPassword, logoWidth, photoRetentionHours, googleClientId, googleClientSecret } = req.body;
+  const { publicGalleryEnabled, publicGalleryHeading, newPassword, logoWidth, photoRetentionHours, googleClientId, googleClientSecret, galleryMessage } = req.body;
   const settings = await readSettings();
 
   if (publicGalleryEnabled !== undefined) settings.publicGalleryEnabled = !!publicGalleryEnabled;
@@ -852,6 +854,9 @@ app.post('/api/admin/settings', checkAdminAuth, async (req, res) => {
   if (googleClientSecret !== undefined && googleClientSecret !== '********' && googleClientSecret.trim() !== '') {
     settings.googleClientSecret = googleClientSecret.trim();
     cachedGoogleFolderId = '';
+  }
+  if (galleryMessage !== undefined) {
+    settings.galleryMessage = galleryMessage;
   }
 
   try {
