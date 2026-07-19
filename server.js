@@ -418,7 +418,11 @@ app.get('/api/gallery', async (req, res) => {
       });
     }
     const gallery = await readGalleryDb();
-    const publicPhotos = gallery.filter(photo => photo.status === 'approved' && photo.isPublic === true);
+    const publicPhotos = gallery.filter(photo => {
+      const status = photo.status === undefined ? 'approved' : photo.status;
+      const isPublic = photo.isPublic === undefined ? true : photo.isPublic;
+      return status === 'approved' && isPublic === true;
+    });
     res.json({
       success: true,
       photos: publicPhotos,
@@ -492,8 +496,8 @@ async function processUploadTask(req) {
     uploadTime,
     timestamp: uploadTime,
     descriptors,
-    status: isAdmin ? 'approved' : 'pending',
-    isPublic: isAdmin ? (req.body.isPublic === 'true' || req.body.isPublic === true) : false
+    status: 'approved',
+    isPublic: req.body.isPublic === 'false' || req.body.isPublic === false ? false : true
   };
 
   try {

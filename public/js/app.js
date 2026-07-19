@@ -61,6 +61,40 @@ function loadImageElement(source) {
   });
 }
 
+function computeIoU(boxA, boxB) {
+  const x1 = Math.max(boxA.left, boxB.left);
+  const y1 = Math.max(boxA.top, boxB.top);
+  const x2 = Math.min(boxA.right, boxB.right);
+  const y2 = Math.min(boxA.bottom, boxB.bottom);
+  const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const areaA = Math.max(0, boxA.right - boxA.left) * Math.max(0, boxA.bottom - boxA.top);
+  const areaB = Math.max(0, boxB.right - boxB.left) * Math.max(0, boxB.bottom - boxB.top);
+  return areaA + areaB === 0 ? 0 : intersection / (areaA + areaB - intersection);
+}
+
+function mergeFaceDetections(primary, fallback) {
+  const merged = [...primary];
+  fallback.forEach(fallbackDetection => {
+    const fallbackBox = {
+      left: fallbackDetection.detection.box.left,
+      top: fallbackDetection.detection.box.top,
+      right: fallbackDetection.detection.box.left + fallbackDetection.detection.box.width,
+      bottom: fallbackDetection.detection.box.top + fallbackDetection.detection.box.height
+    };
+    const duplicate = merged.some(existing => {
+      const existingBox = {
+        left: existing.detection.box.left,
+        top: existing.detection.box.top,
+        right: existing.detection.box.left + existing.detection.box.width,
+        bottom: existing.detection.box.top + existing.detection.box.height
+      };
+      return computeIoU(existingBox, fallbackBox) > 0.45;
+    });
+    if (!duplicate) merged.push(fallbackDetection);
+  });
+  return merged;
+}
+
 async function computeFaceDescriptors(source) {
   await loadFaceApiModels();
 
@@ -75,28 +109,28 @@ async function computeFaceDescriptors(source) {
     descriptor: Array.from(detection.descriptor)
   }));
 
-  // Primary: TinyFaceDetector (fast). Slightly looser threshold for real-world photos.
   let detections = await faceapi
-    .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.35 }))
+    .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 640, scoreThreshold: 0.25 }))
     .withFaceLandmarks()
     .withFaceDescriptors();
 
-  // Fallback: SSD MobileNet if TinyFace finds nothing (better for small/side faces)
-  if (detections.length === 0 && faceapi.nets.ssdMobilenetv1.isLoaded) {
-    detections = await faceapi
-      .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }))
+  let ssdDetections = [];
+  try {
+    if (!faceapi.nets.ssdMobilenetv1.isLoaded) {
+      await faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath);
+    }
+    ssdDetections = await faceapi
+      .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 }))
       .withFaceLandmarks()
       .withFaceDescriptors();
-  } else if (detections.length === 0) {
-    try {
-      await faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath);
-      detections = await faceapi
-        .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }))
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-    } catch (ssdErr) {
-      console.warn('SSD MobileNet fallback unavailable:', ssdErr);
-    }
+  } catch (ssdErr) {
+    console.warn('SSD MobileNet detection unavailable:', ssdErr);
+  }
+
+  if (detections.length === 0 && ssdDetections.length > 0) {
+    detections = ssdDetections;
+  } else if (ssdDetections.length > detections.length) {
+    detections = mergeFaceDetections(detections, ssdDetections);
   }
 
   return mapDetections(detections);
