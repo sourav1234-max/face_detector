@@ -113,9 +113,31 @@
                   <h2 id="gallery-catalog-heading">Gallery Catalog</h2>
                   <p>Browse through <span id="gallery-total-count">0</span> uploaded photo(s)</p>
                 </div>
-                <div class="gallery-controls">
+                <div class="gallery-controls" style="display: flex; gap: 8px; align-items: center;">
+                  <button class="btn btn-secondary btn-sm" id="gallery-select-mode-btn">
+                    <i class="fa-solid fa-list-check"></i> Select Photos
+                  </button>
                   <button class="btn-icon" id="refresh-gallery-btn" title="Refresh Gallery">
                     <i class="fa-solid fa-rotate-right"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Multi-select Batch Action Toolbar -->
+              <div id="gallery-batch-bar" class="gallery-batch-bar hidden">
+                <div class="batch-info">
+                  <i class="fa-solid fa-circle-check" style="color: var(--primary);"></i>
+                  <span id="batch-selected-count">0</span> photo(s) selected
+                </div>
+                <div class="batch-actions">
+                  <button class="btn btn-secondary btn-sm" id="batch-select-all-btn">
+                    <i class="fa-solid fa-square-check"></i> Select All
+                  </button>
+                  <button class="btn btn-secondary btn-sm" id="batch-clear-btn">
+                    <i class="fa-solid fa-square-xmark"></i> Clear
+                  </button>
+                  <button class="btn btn-primary btn-sm" id="batch-download-btn" disabled>
+                    <i class="fa-solid fa-file-zipper"></i> Download Selected (ZIP)
                   </button>
                 </div>
               </div>
@@ -291,8 +313,27 @@
           <span class="detail-value" id="detail-faces">2 face(s)</span>
         </div>
 
+        <!-- Image Rotation Controls -->
+        <div class="lightbox-rotation-section" style="margin: 16px 0; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);">
+          <span class="detail-label" style="display:block; margin-bottom:8px; font-weight: 600;">Rotate Image</span>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary btn-sm" id="rotate-left-btn" style="flex:1;" title="Rotate 90° Left">
+              <i class="fa-solid fa-rotate-left"></i> -90°
+            </button>
+            <button class="btn btn-secondary btn-sm" id="rotate-right-btn" style="flex:1;" title="Rotate 90° Right">
+              <i class="fa-solid fa-rotate-right"></i> +90°
+            </button>
+            <button class="btn btn-secondary btn-sm" id="rotate-reset-btn" title="Reset Rotation">
+              <i class="fa-solid fa-arrow-rotate-left"></i>
+            </button>
+          </div>
+        </div>
+
         <div class="lightbox-actions">
-          <a id="lightbox-download-link" href="" download class="btn btn-primary btn-block text-center">
+          <button id="lightbox-download-btn" class="btn btn-primary btn-block text-center" style="cursor: pointer;">
+            <i class="fa-solid fa-download"></i> Download Photo
+          </button>
+          <a id="lightbox-download-link" href="" download class="btn btn-primary btn-block text-center" style="display:none;">
             <i class="fa-solid fa-download"></i> Download Full Photo
           </a>
           <button id="lightbox-delete-btn" class="btn btn-danger btn-block">

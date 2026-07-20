@@ -632,8 +632,8 @@ async function syncGoogleDrivePhotos(req = null, forceAll = false) {
           uploadTime,
           timestamp: uploadTime,
           descriptors,
-          status: 'approved',
-          isPublic: true,
+          status: 'pending',
+          isPublic: false,
           faceDetectionStatus,
           faceDetected
         };
@@ -777,8 +777,8 @@ async function syncLocalUploadsIfNeeded() {
           faceDetectionStatus,
           faceDetected,
           descriptors: descriptors.map(f => f.descriptor),
-          status: 'approved',
-          isPublic: true
+          status: 'pending',
+          isPublic: false
         };
 
         await addPhoto(photoRecord);
@@ -820,26 +820,6 @@ app.get('/api/gallery', async (req, res) => {
       const isPublic = photo.isPublic === undefined ? true : photo.isPublic;
       return status === 'approved' && isPublic === true;
     });
-
-    if (settings.googleRefreshToken) {
-      try {
-        const drivePhotos = await listGoogleDriveGalleryFiles(req);
-        if (drivePhotos.length > 0) {
-          const existingFileIds = new Set(
-            publicPhotos
-              .filter(p => p.fileId || (p.filename && p.filename.startsWith('drive:')))
-              .map(p => p.fileId || p.filename.slice('drive:'.length))
-          );
-          const unsyncedDrivePhotos = drivePhotos.filter(dp => !existingFileIds.has(dp.fileId));
-          if (unsyncedDrivePhotos.length > 0) {
-            publicPhotos = [...publicPhotos, ...unsyncedDrivePhotos];
-            publicPhotos.sort((a, b) => String(b.timestamp || b.uploadTime || '').localeCompare(String(a.timestamp || a.uploadTime || '')));
-          }
-        }
-      } catch (driveErr) {
-        console.error('[Gallery Endpoint] Failed to list/merge Google Drive photos:', driveErr.message || driveErr);
-      }
-    }
 
     res.json({
       success: true,
@@ -1062,8 +1042,8 @@ async function processUploadTask(req) {
     uploadTime,
     timestamp: uploadTime,
     descriptors,
-    status: 'approved',
-    isPublic: req.body.isPublic === 'false' || req.body.isPublic === false ? false : true,
+    status: isAdmin ? (req.body.status || 'approved') : 'pending',
+    isPublic: isAdmin ? (req.body.isPublic === 'false' || req.body.isPublic === false ? false : true) : false,
     faceDetectionStatus: descriptors.length > 0 
       ? 'Face Detected' 
       : (faceDetectionError ? `Face Detection Error: ${faceDetectionError}` : 'No Face Detected'),
@@ -1528,13 +1508,52 @@ app.post('/api/delete', checkAdminAuth, async (req, res) => {
 
 app.post('/api/admin/delete-all', checkAdminAuth, async (req, res) => {
   try {
+    const { filter, ids } = req.body || {};
     const gallery = await readGalleryDb();
-    console.log(`[Admin Delete All] Deleting all ${gallery.length} photos...`);
-    for (const photo of gallery) {
+
+    let photosToDelete = [];
+    let photosToKeep = [];
+
+    if (Array.isArray(ids) && ids.length > 0) {
+      const idSet = new Set(ids);
+      photosToDelete = gallery.filter(p => idSet.has(p.id));
+      photosToKeep = gallery.filter(p => !idSet.has(p.id));
+    } else if (filter && filter !== 'all') {
+      photosToDelete = gallery.filter(photo => {
+        if (filter === 'public-upload' || filter === 'public') {
+          return photo.uploadedBy !== 'admin';
+        }
+        if (filter === 'admin-upload' || filter === 'admin') {
+          return photo.uploadedBy === 'admin';
+        }
+        if (filter === 'pending') {
+          return photo.status === 'pending';
+        }
+        if (filter === 'approved') {
+          return photo.status === 'approved';
+        }
+        if (filter === 'rejected') {
+          return photo.status === 'rejected';
+        }
+        if (filter === 'no-face') {
+          return !photo.descriptors || photo.descriptors.length === 0;
+        }
+        return false;
+      });
+      photosToKeep = gallery.filter(p => !photosToDelete.includes(p));
+    } else {
+      photosToDelete = [...gallery];
+      photosToKeep = [];
+    }
+
+    console.log(`[Admin Delete] Deleting ${photosToDelete.length} matching photo(s) (Filter: '${filter || 'all'}')...`);
+
+    for (const photo of photosToDelete) {
       await deletePhotoAssets(photo, req);
     }
-    await writeGalleryDb([]);
-    res.json({ success: true, message: 'All photos deleted successfully' });
+
+    await writeGalleryDb(photosToKeep);
+    res.json({ success: true, count: photosToDelete.length, message: `Successfully deleted ${photosToDelete.length} photo(s)` });
   } catch (err) {
     console.error('Delete-all endpoint error:', err);
     res.status(500).json({ success: false, error: err.message });

@@ -1240,3 +1240,105 @@ body {
 
 /* Custom alignment utilities */
 .text-center { text-align: center; }
+
+/* ==========================================================================
+   Multi-Select Batch Toolbar & Checkbox Styles
+   ========================================================================== */
+.gallery-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(59, 130, 246, 0.08));
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: var(--border-radius-md);
+  padding: 12px 18px;
+  margin-bottom: 16px;
+  animation: fadeIn 0.3s ease;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.gallery-batch-bar .batch-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gallery-batch-bar .batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: 16px;
+}
+
+.gallery-item {
+  position: relative;
+}
+
+.gallery-item-checkbox {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.gallery-item-checkbox i {
+  color: #fff;
+  font-size: 13px;
+  display: none;
+}
+
+.gallery-item.selected .gallery-item-checkbox {
+  background: var(--primary);
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+}
+
+.gallery-item.selected .gallery-item-checkbox i {
+  display: block;
+}
+
+.gallery-item.selected {
+  outline: 3px solid var(--primary);
+  outline-offset: -3px;
+  border-radius: var(--border-radius-md);
+}
+
+.gallery-item:hover .gallery-item-checkbox {
+  border-color: #fff;
+  background: rgba(139, 92, 246, 0.6);
+}
+
+/* Lightbox Image Rotation Styling */
+.lightbox-image-container {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#lightbox-img {
+  transition: transform 0.3s ease-in-out;
+  max-width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
+}
+

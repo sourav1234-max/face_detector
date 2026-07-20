@@ -11,6 +11,10 @@ window.searchQueryDescriptors = [];
 window.webcamStream = null;
 window.isWebcamActive = false;
 window.faceApiLoaded = false;
+window.selectedPhotoIds = new Set();
+window.isSelectMode = false;
+window.currentLightboxRotation = 0;
+window.currentLightboxPhoto = null;
 
 // Configuration & Face API
 async function loadFaceApiModels() {
@@ -285,6 +289,17 @@ function setupUploadTabEvents() {
   startUploadBtn.addEventListener('click', startBatchUpload);
   clearQueueBtn.addEventListener('click', clearQueue);
   refreshBtn.addEventListener('click', fetchGallery);
+
+  // Multi-select controls
+  const selectModeBtn = document.getElementById('gallery-select-mode-btn');
+  const batchSelectAllBtn = document.getElementById('batch-select-all-btn');
+  const batchClearBtn = document.getElementById('batch-clear-btn');
+  const batchDownloadBtn = document.getElementById('batch-download-btn');
+
+  if (selectModeBtn) selectModeBtn.addEventListener('click', toggleSelectMode);
+  if (batchSelectAllBtn) batchSelectAllBtn.addEventListener('click', selectAllPhotos);
+  if (batchClearBtn) batchClearBtn.addEventListener('click', clearPhotoSelection);
+  if (batchDownloadBtn) batchDownloadBtn.addEventListener('click', downloadSelectedPhotosZip);
 }
 
 // Batch Upload Queue Setup
@@ -496,6 +511,125 @@ function updateGalleryUI() {
   renderGalleryPage();
 }
 
+// --- Multi-Select Gallery Logic ---
+function toggleSelectMode() {
+  window.isSelectMode = !window.isSelectMode;
+  const selectModeBtn = document.getElementById('gallery-select-mode-btn');
+  const batchBar = document.getElementById('gallery-batch-bar');
+
+  if (window.isSelectMode) {
+    if (selectModeBtn) {
+      selectModeBtn.classList.remove('btn-secondary');
+      selectModeBtn.classList.add('btn-primary');
+      selectModeBtn.innerHTML = `<i class="fa-solid fa-xmark"></i> Exit Selection`;
+    }
+    if (batchBar) batchBar.classList.remove('hidden');
+  } else {
+    window.selectedPhotoIds.clear();
+    if (selectModeBtn) {
+      selectModeBtn.classList.remove('btn-primary');
+      selectModeBtn.classList.add('btn-secondary');
+      selectModeBtn.innerHTML = `<i class="fa-solid fa-list-check"></i> Select Photos`;
+    }
+    if (batchBar) batchBar.classList.add('hidden');
+  }
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  const batchBar = document.getElementById('gallery-batch-bar');
+  const countEl = document.getElementById('batch-selected-count');
+  const downloadBtn = document.getElementById('batch-download-btn');
+  const selectedCount = window.selectedPhotoIds.size;
+
+  if (countEl) countEl.innerText = selectedCount;
+
+  if (downloadBtn) {
+    downloadBtn.disabled = selectedCount === 0;
+  }
+
+  if (selectedCount > 0 && batchBar) {
+    batchBar.classList.remove('hidden');
+  }
+
+  const grid = document.getElementById('gallery-grid');
+  if (grid) {
+    const items = grid.querySelectorAll('.gallery-item');
+    items.forEach(item => {
+      const id = item.getAttribute('data-photo-id');
+      if (id && window.selectedPhotoIds.has(id)) {
+        item.classList.add('selected');
+      } else {
+        item.classList.remove('selected');
+      }
+    });
+  }
+}
+
+function selectAllPhotos() {
+  if (!window.galleryCatalog) return;
+  window.galleryCatalog.forEach(photo => {
+    if (photo.id) window.selectedPhotoIds.add(photo.id);
+  });
+  if (!window.isSelectMode) toggleSelectMode(); else updateSelectionUI();
+}
+
+function clearPhotoSelection() {
+  window.selectedPhotoIds.clear();
+  updateSelectionUI();
+}
+
+async function downloadSelectedPhotosZip() {
+  if (window.selectedPhotoIds.size === 0) return;
+
+  const downloadBtn = document.getElementById('batch-download-btn');
+  const originalHtml = downloadBtn ? downloadBtn.innerHTML : '';
+
+  if (downloadBtn) {
+    downloadBtn.disabled = true;
+    downloadBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Zipping ${window.selectedPhotoIds.size}...`;
+  }
+
+  try {
+    const zip = new JSZip();
+    const folder = zip.folder("smriti_chitra_photos");
+
+    const selectedPhotos = window.galleryCatalog.filter(p => window.selectedPhotoIds.has(p.id));
+
+    for (let i = 0; i < selectedPhotos.length; i++) {
+      const photo = selectedPhotos[i];
+      const imageUrl = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
+      
+      try {
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        
+        let filename = photo.originalName || `photo_${i + 1}.jpg`;
+        folder.file(filename, blob);
+      } catch (err) {
+        console.error(`Failed to fetch ${photo.originalName}:`, err);
+      }
+    }
+
+    const content = await zip.generateAsync({ type: "blob" });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(content);
+    link.download = `gallery-photos-${Date.now()}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+  } catch (err) {
+    console.error("Failed to generate ZIP:", err);
+    alert("Could not generate ZIP: " + err.message);
+  } finally {
+    if (downloadBtn) {
+      downloadBtn.disabled = window.selectedPhotoIds.size === 0;
+      downloadBtn.innerHTML = originalHtml;
+    }
+  }
+}
+
 // Render a page of gallery items and optionally append a Load More button
 function renderGalleryPage() {
   const grid = document.getElementById('gallery-grid');
@@ -519,7 +653,37 @@ function renderGalleryPage() {
     const photo = window.galleryCatalog[i];
     const itemEl = document.createElement('div');
     itemEl.className = 'gallery-item';
-    itemEl.addEventListener('click', () => openLightbox(photo));
+    if (photo.id) itemEl.setAttribute('data-photo-id', photo.id);
+
+    if (photo.id && window.selectedPhotoIds.has(photo.id)) {
+      itemEl.classList.add('selected');
+    }
+
+    itemEl.addEventListener('click', (e) => {
+      // Toggle selection if checkbox clicked or in select mode
+      if (e.target.closest('.gallery-item-checkbox') || window.isSelectMode) {
+        e.stopPropagation();
+        if (photo.id) {
+          if (window.selectedPhotoIds.has(photo.id)) {
+            window.selectedPhotoIds.delete(photo.id);
+          } else {
+            window.selectedPhotoIds.add(photo.id);
+            if (!window.isSelectMode) {
+              window.isSelectMode = true;
+              const selectModeBtn = document.getElementById('gallery-select-mode-btn');
+              if (selectModeBtn) {
+                selectModeBtn.classList.remove('btn-secondary');
+                selectModeBtn.classList.add('btn-primary');
+                selectModeBtn.innerHTML = `<i class="fa-solid fa-xmark"></i> Exit Selection`;
+              }
+            }
+          }
+          updateSelectionUI();
+        }
+      } else {
+        openLightbox(photo);
+      }
+    });
 
     const dateStr = new Date(photo.timestamp).toLocaleDateString(undefined, {
       month: 'short',
@@ -532,6 +696,9 @@ function renderGalleryPage() {
       : '';
 
     itemEl.innerHTML = `
+      <div class="gallery-item-checkbox" title="Select photo">
+        <i class="fa-solid fa-check"></i>
+      </div>
       ${badgeHtml}
       <div class="gallery-image-wrapper">
         <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="gallery-image" alt="Gallery photo" loading="lazy">
@@ -1077,7 +1244,7 @@ async function downloadAllMatchesZip() {
   }
 }
 
-// --- Lightbox Modal Logic ---
+// --- Lightbox Modal Logic & Image Rotation ---
 function setupLightboxEvents() {
   const modal = document.getElementById('lightbox-modal');
   const closeBtn = document.getElementById('lightbox-close-btn');
@@ -1097,9 +1264,52 @@ function setupLightboxEvents() {
       closeLightbox();
     }
   });
+
+  // Rotation controls
+  const rotateLeftBtn = document.getElementById('rotate-left-btn');
+  const rotateRightBtn = document.getElementById('rotate-right-btn');
+  const rotateResetBtn = document.getElementById('rotate-reset-btn');
+  const downloadBtn = document.getElementById('lightbox-download-btn');
+
+  if (rotateLeftBtn) rotateLeftBtn.addEventListener('click', () => rotateLightboxImage(-90));
+  if (rotateRightBtn) rotateRightBtn.addEventListener('click', () => rotateLightboxImage(90));
+  if (rotateResetBtn) rotateResetBtn.addEventListener('click', () => resetLightboxRotation());
+  if (downloadBtn) downloadBtn.addEventListener('click', downloadCurrentLightboxPhoto);
+}
+
+function rotateLightboxImage(delta) {
+  window.currentLightboxRotation = (window.currentLightboxRotation + delta + 360) % 360;
+  applyLightboxRotation();
+}
+
+function resetLightboxRotation() {
+  window.currentLightboxRotation = 0;
+  applyLightboxRotation();
+}
+
+function applyLightboxRotation() {
+  const img = document.getElementById('lightbox-img');
+  const canvas = document.getElementById('lightbox-canvas');
+  const angle = window.currentLightboxRotation || 0;
+
+  if (img) {
+    img.style.transform = `rotate(${angle}deg)`;
+  }
+  if (canvas) {
+    // Canvas face overlays align best at 0deg
+    if (angle !== 0) {
+      canvas.style.display = 'none';
+    } else {
+      canvas.style.display = 'block';
+    }
+  }
 }
 
 function openLightbox(photo) {
+  window.currentLightboxPhoto = photo;
+  window.currentLightboxRotation = 0;
+  applyLightboxRotation();
+
   const modal = document.getElementById('lightbox-modal');
   const img = document.getElementById('lightbox-img');
   const canvas = document.getElementById('lightbox-canvas');
@@ -1109,7 +1319,9 @@ function openLightbox(photo) {
   const downloadLink = document.getElementById('lightbox-download-link');
   const deleteBtn = document.getElementById('lightbox-delete-btn');
 
-  img.src = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
+  const photoUrl = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
+
+  img.src = photoUrl;
   filename.innerText = photo.originalName;
   
   date.innerText = new Date(photo.timestamp).toLocaleString(undefined, {
@@ -1123,13 +1335,14 @@ function openLightbox(photo) {
   const facesCount = photo.descriptors ? photo.descriptors.length : 0;
   faces.innerText = facesCount > 0 ? `${facesCount} face(s) identified` : 'No Face Detected';
 
-  downloadLink.href = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
-  downloadLink.setAttribute('download', photo.originalName);
+  if (downloadLink) {
+    downloadLink.href = photoUrl;
+    downloadLink.setAttribute('download', photo.originalName);
+  }
 
   // Hide delete button for normal public users
-  deleteBtn.style.display = 'none';
+  if (deleteBtn) deleteBtn.style.display = 'none';
 
-  // Set up delete trigger (kept just in case)
   deleteBtn.onclick = () => {
     if (confirm("Are you sure you want to delete this photo permanently? This action cannot be undone.")) {
       deletePhoto(photo.id);
@@ -1147,7 +1360,6 @@ function openLightbox(photo) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (photo.descriptors && photo.descriptors.length > 0) {
-      // Calculate scales based on client dimension vs natural dimension of image
       const scaleX = img.clientWidth / img.naturalWidth;
       const scaleY = img.clientHeight / img.naturalHeight;
 
@@ -1157,7 +1369,6 @@ function openLightbox(photo) {
       ctx.shadowColor = '#8b5cf6';
 
       photo.descriptors.forEach(faceData => {
-        // Handle both older flat array descriptors or new structure containing {box, descriptor}
         const box = faceData.box;
         if (box) {
           const x = box.x * scaleX;
@@ -1170,16 +1381,126 @@ function openLightbox(photo) {
           ctx.stroke();
         }
       });
-      ctx.shadowBlur = 0; // reset
+      ctx.shadowBlur = 0;
     }
   };
+}
+
+async function downloadCurrentLightboxPhoto() {
+  const photo = window.currentLightboxPhoto;
+  if (!photo) return;
+
+  const imageUrl = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
+  const filename = photo.originalName || 'photo.jpg';
+  const angle = window.currentLightboxRotation || 0;
+
+  const downloadBtn = document.getElementById('lightbox-download-btn');
+  const originalHtml = downloadBtn ? downloadBtn.innerHTML : '';
+
+  if (angle === 0) {
+    // Download original directly via fetch -> blob or link
+    try {
+      if (downloadBtn) {
+        downloadBtn.disabled = true;
+        downloadBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Downloading...`;
+      }
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      // Fallback to direct link click if fetch fails (e.g. CORS)
+      const link = document.createElement('a');
+      link.href = imageUrl;
+      link.download = filename;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } finally {
+      if (downloadBtn) {
+        downloadBtn.disabled = false;
+        downloadBtn.innerHTML = originalHtml;
+      }
+    }
+    return;
+  }
+
+  if (downloadBtn) {
+    downloadBtn.disabled = true;
+    downloadBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Rotating & Downloading...`;
+  }
+
+  try {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = imageUrl;
+
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error("Failed to load image for rotation rendering"));
+    });
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+
+    if (angle === 90 || angle === 270) {
+      canvas.width = height;
+      canvas.height = width;
+    } else {
+      canvas.width = width;
+      canvas.height = height;
+    }
+
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((angle * Math.PI) / 180);
+    ctx.drawImage(img, -width / 2, -height / 2);
+
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        alert('Failed to generate rotated image blob.');
+        return;
+      }
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+
+      const extIndex = filename.lastIndexOf('.');
+      const rotatedFilename = extIndex !== -1 
+        ? `${filename.substring(0, extIndex)}_rotated_${angle}deg${filename.substring(extIndex)}`
+        : `${filename}_rotated_${angle}deg.jpg`;
+
+      link.download = rotatedFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }, 'image/jpeg', 0.95);
+
+  } catch (err) {
+    console.error("Rotated photo download error:", err);
+    alert("Could not download rotated image: " + err.message);
+  } finally {
+    if (downloadBtn) {
+      downloadBtn.disabled = false;
+      downloadBtn.innerHTML = originalHtml;
+    }
+  }
 }
 
 function closeLightbox() {
   const modal = document.getElementById('lightbox-modal');
   modal.style.display = 'none';
-  // Clear image source to free resources
+  window.currentLightboxPhoto = null;
+  window.currentLightboxRotation = 0;
+  applyLightboxRotation();
+
   document.getElementById('lightbox-img').src = '';
   const canvas = document.getElementById('lightbox-canvas');
-  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
 }

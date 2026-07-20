@@ -392,6 +392,8 @@ function updateStatsAndRender() {
   const approvedCount = photos.filter(p => p.status === 'approved').length;
   const rejectedCount = photos.filter(p => p.status === 'rejected').length;
   const noFaceCount = photos.filter(p => !p.descriptors || p.descriptors.length === 0).length;
+  const publicUploadCount = photos.filter(p => p.uploadedBy !== 'admin').length;
+  const adminUploadCount = photos.filter(p => p.uploadedBy === 'admin').length;
 
   // Render stats counters
   document.getElementById('stat-total').innerText = totalCount;
@@ -401,26 +403,29 @@ function updateStatsAndRender() {
   const noFaceEl = document.getElementById('stat-no-face');
   if (noFaceEl) noFaceEl.innerText = noFaceCount;
 
-  // Render Tab Pending Badge count
-  const badgeEl = document.getElementById('badge-pending-count');
-  if (badgeEl) {
-    if (pendingCount > 0) {
-      badgeEl.innerText = pendingCount;
-      badgeEl.style.display = 'inline-block';
-    } else {
-      badgeEl.style.display = 'none';
-    }
+  // Render Tab Badges
+  const badgePending = document.getElementById('badge-pending-count');
+  if (badgePending) {
+    badgePending.innerText = pendingCount;
+    badgePending.style.display = pendingCount > 0 ? 'inline-block' : 'none';
   }
 
-  // Render Tab No Face Badge count
+  const badgePublic = document.getElementById('badge-public-count');
+  if (badgePublic) {
+    badgePublic.innerText = publicUploadCount;
+    badgePublic.style.display = publicUploadCount > 0 ? 'inline-block' : 'none';
+  }
+
+  const badgeAdmin = document.getElementById('badge-admin-count');
+  if (badgeAdmin) {
+    badgeAdmin.innerText = adminUploadCount;
+    badgeAdmin.style.display = adminUploadCount > 0 ? 'inline-block' : 'none';
+  }
+
   const noFaceBadgeEl = document.getElementById('badge-no-face-count');
   if (noFaceBadgeEl) {
-    if (noFaceCount > 0) {
-      noFaceBadgeEl.innerText = noFaceCount;
-      noFaceBadgeEl.style.display = 'inline-block';
-    } else {
-      noFaceBadgeEl.style.display = 'none';
-    }
+    noFaceBadgeEl.innerText = noFaceCount;
+    noFaceBadgeEl.style.display = noFaceCount > 0 ? 'inline-block' : 'none';
   }
 
   renderModerationTable();
@@ -449,7 +454,11 @@ function renderModerationTable() {
 
   // Filter photos
   let filtered = window.allPhotos;
-  if (window.activeFilter === 'pending') {
+  if (window.activeFilter === 'public-upload' || window.activeFilter === 'public') {
+    filtered = window.allPhotos.filter(photo => photo.uploadedBy !== 'admin');
+  } else if (window.activeFilter === 'admin-upload' || window.activeFilter === 'admin') {
+    filtered = window.allPhotos.filter(photo => photo.uploadedBy === 'admin');
+  } else if (window.activeFilter === 'pending') {
     filtered = window.allPhotos.filter(photo => photo.status === 'pending');
   } else if (window.activeFilter === 'approved') {
     filtered = window.allPhotos.filter(photo => photo.status === 'approved');
@@ -457,6 +466,20 @@ function renderModerationTable() {
     filtered = window.allPhotos.filter(photo => photo.status === 'rejected');
   } else if (window.activeFilter === 'no-face') {
     filtered = window.allPhotos.filter(photo => !photo.descriptors || photo.descriptors.length === 0);
+  }
+
+  // Update Bulk Delete button text matching the active filter and count
+  const bulkDeleteAllBtn = document.getElementById('bulk-delete-all-btn');
+  if (bulkDeleteAllBtn) {
+    let filterLabel = 'All Photos';
+    if (window.activeFilter === 'public-upload') filterLabel = 'Public Uploads';
+    else if (window.activeFilter === 'admin-upload') filterLabel = 'Admin Uploads';
+    else if (window.activeFilter === 'pending') filterLabel = 'Pending';
+    else if (window.activeFilter === 'approved') filterLabel = 'Approved';
+    else if (window.activeFilter === 'rejected') filterLabel = 'Rejected';
+    else if (window.activeFilter === 'no-face') filterLabel = 'No-Face Photos';
+
+    bulkDeleteAllBtn.innerHTML = `<i class="fa-solid fa-trash-can"></i> Delete ${filterLabel} (${filtered.length})`;
   }
 
   // Sort: pending first, then newest first
@@ -1184,35 +1207,58 @@ function setupBulkActions() {
   const bulkDeleteAllBtn = document.getElementById('bulk-delete-all-btn');
   if (bulkDeleteAllBtn) {
     bulkDeleteAllBtn.addEventListener('click', async () => {
-      if (window.allPhotos.length === 0) {
-        alert("There are no photos in the gallery to delete.");
+      let filterLabel = 'All Photos';
+      let targetPhotos = window.allPhotos;
+
+      if (window.activeFilter === 'public-upload' || window.activeFilter === 'public') {
+        filterLabel = 'Public Uploads';
+        targetPhotos = window.allPhotos.filter(p => p.uploadedBy !== 'admin');
+      } else if (window.activeFilter === 'admin-upload' || window.activeFilter === 'admin') {
+        filterLabel = 'Admin Uploads';
+        targetPhotos = window.allPhotos.filter(p => p.uploadedBy === 'admin');
+      } else if (window.activeFilter === 'pending') {
+        filterLabel = 'Pending Photos';
+        targetPhotos = window.allPhotos.filter(p => p.status === 'pending');
+      } else if (window.activeFilter === 'approved') {
+        filterLabel = 'Approved Photos';
+        targetPhotos = window.allPhotos.filter(p => p.status === 'approved');
+      } else if (window.activeFilter === 'rejected') {
+        filterLabel = 'Rejected Photos';
+        targetPhotos = window.allPhotos.filter(p => p.status === 'rejected');
+      } else if (window.activeFilter === 'no-face') {
+        filterLabel = 'No-Face Photos';
+        targetPhotos = window.allPhotos.filter(p => !p.descriptors || p.descriptors.length === 0);
+      }
+
+      if (targetPhotos.length === 0) {
+        alert(`There are no photos matching the "${filterLabel}" filter to delete.`);
         return;
       }
       
-      const confirmFirst = confirm(`WARNING: Are you sure you want to permanently delete ALL ${window.allPhotos.length} photo(s) from the server? This will delete all image files, Google Drive files, and facial descriptor data. This action is irreversible.`);
+      const confirmFirst = confirm(`WARNING: Are you sure you want to permanently delete all ${targetPhotos.length} photo(s) in category "${filterLabel}"? This will remove files and facial data. This action is irreversible.`);
       if (!confirmFirst) return;
 
-      const confirmSecond = confirm(`FINAL CONFIRMATION: Type 'DELETE ALL' in the next prompt if you are absolutely sure.`);
+      const confirmSecond = confirm(`FINAL CONFIRMATION: Click OK to delete these ${targetPhotos.length} photo(s).`);
       if (!confirmSecond) return;
-      
-      const typedConfirmation = prompt(`Please type 'DELETE ALL' to confirm deletion of all files:`);
-      if (typedConfirmation !== 'DELETE ALL') {
-        alert("Incorrect confirmation text. Deletion cancelled.");
-        return;
-      }
 
       try {
+        const idsToDelete = targetPhotos.map(p => p.id);
         const res = await adminFetch('/api/admin/delete-all', {
-          method: 'POST'
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filter: window.activeFilter,
+            ids: idsToDelete
+          })
         });
         if (res.success) {
-          alert("All photos have been successfully deleted.");
+          alert(`Successfully deleted ${res.count || targetPhotos.length} photo(s) from "${filterLabel}".`);
           await loadDashboardData();
         } else {
           alert("Error: " + res.error);
         }
       } catch (err) {
-        console.error("Bulk delete all failed:", err);
+        console.error("Bulk delete failed:", err);
       }
     });
   }

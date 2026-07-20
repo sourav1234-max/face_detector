@@ -665,8 +665,12 @@
             </div>
 
             <!-- Filtering tab buttons -->
-            <div class="filter-tabs" style="margin-bottom: 8px;">
+            <div class="filter-tabs" style="margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
               <button class="filter-btn active" data-filter="all">All Photos</button>
+              <button class="filter-btn" data-filter="public-upload">Public Uploads <span id="badge-public-count"
+                  style="display:none; background: #8b5cf6; color:#fff; padding:1px 6px; border-radius:10px; font-size:10px; font-weight:700;">0</span></button>
+              <button class="filter-btn" data-filter="admin-upload">Admin Uploads <span id="badge-admin-count"
+                  style="display:none; background: rgba(255, 255, 255, 0.15); color:#fff; padding:1px 6px; border-radius:10px; font-size:10px; font-weight:700;">0</span></button>
               <button class="filter-btn" data-filter="pending">Pending <span id="badge-pending-count"
                   style="display:none; background: var(--warning); color:#000; padding:1px 6px; border-radius:10px; font-size:10px; font-weight:700;">0</span></button>
               <button class="filter-btn" data-filter="approved">Approved</button>
