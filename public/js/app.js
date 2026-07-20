@@ -33,7 +33,7 @@ async function computeFaceDescriptorsWithTimeout(source) {
 
 // Limits to protect browser memory
 const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB per file
-const MAX_UPLOAD_QUEUE = 50; // max files in client-side queue
+const MAX_UPLOAD_QUEUE = 15; // max files in client-side queue (limit 15)
 const MAX_ZIP_DOWNLOAD = 20; // max images to bundle client-side
 // Gallery refresh settings
 const GALLERY_POLL_INTERVAL = 30 * 1000; // 30 seconds
@@ -289,7 +289,8 @@ function setupUploadTabEvents() {
 
 // Batch Upload Queue Setup
 window.publicBatchQueue = new FaceDetectorUtils.BatchUploadQueue({
-  concurrency: 2,
+  concurrency: 1,
+  maxQueueSize: MAX_UPLOAD_QUEUE,
   maxRetries: 3,
   isPublic: true,
   onItemChange: (item, action) => {
@@ -335,14 +336,32 @@ function handleFilesAdded(fileList) {
   const queueContainer = document.getElementById('upload-queue-container');
   if (queueContainer) queueContainer.classList.remove('hidden');
 
+  const currentCount = window.publicBatchQueue.queue.length;
+  const availableSlots = MAX_UPLOAD_QUEUE - currentCount;
+
+  if (availableSlots <= 0) {
+    alert(`Maximum limit of ${MAX_UPLOAD_QUEUE} photos reached in upload queue.`);
+    return;
+  }
+
   const validFiles = [];
+  let skippedCount = 0;
+
   for (let i = 0; i < fileList.length; i++) {
     const file = fileList[i];
     if (file.size > MAX_UPLOAD_SIZE) {
       alert(`${file.name} exceeds maximum allowed size of 50 MB.`);
       continue;
     }
-    validFiles.push(file);
+    if (validFiles.length < availableSlots) {
+      validFiles.push(file);
+    } else {
+      skippedCount++;
+    }
+  }
+
+  if (skippedCount > 0) {
+    alert(`Maximum batch upload limit is ${MAX_UPLOAD_QUEUE} photos. ${skippedCount} file(s) were excluded.`);
   }
 
   window.publicBatchQueue.addFiles(validFiles);

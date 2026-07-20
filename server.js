@@ -949,9 +949,9 @@ async function processUploadTask(req) {
     }
   }
 
-  if (descriptors.length > 50) {
-    console.warn(`[Upload] Image ${req.file.originalname} had ${descriptors.length} face descriptors. Capping at 50.`);
-    descriptors = descriptors.slice(0, 50);
+  if (descriptors.length > 15) {
+    console.warn(`[Upload] Image ${req.file.originalname} had ${descriptors.length} face descriptors. Capping at 15.`);
+    descriptors = descriptors.slice(0, 15);
   }
 
   const storageMode = getStorageMode(settings);
@@ -989,7 +989,7 @@ async function processUploadTask(req) {
         try {
           const detectResult = await runPythonFaceDetector(tempPath);
           if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
-            descriptors = detectResult.faces.slice(0, 50);
+            descriptors = detectResult.faces.slice(0, 15);
             console.log(`[Upload] Server-side detection found ${descriptors.length} face(s) in ${originalFileName}.`);
           } else {
             faceDetectionError = detectResult ? detectResult.error : 'No response from python detector';

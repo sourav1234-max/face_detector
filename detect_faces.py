@@ -100,7 +100,7 @@ def main():
                     "descriptor": list(encoding),
                 })
 
-            faces = faces[:50]
+            faces = faces[:15]
             print(json.dumps({"success": True, "faces": faces}))
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))

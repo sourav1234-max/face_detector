@@ -9,7 +9,7 @@ window.selectedPhotoForLightbox = null;
 window.faceApiLoaded = false;
 // Admin-side limits to prevent memory issues
 const ADMIN_MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB
-const ADMIN_MAX_UPLOAD_QUEUE = 50; // max files admin can queue
+const ADMIN_MAX_UPLOAD_QUEUE = 15; // max files admin can queue (limit 15)
 const ADMIN_MOD_TABLE_PAGE_SIZE = 12; // rows per moderation page (reduced to avoid memory spikes)
 let adminModCurrentPage = 0;
 
@@ -1288,7 +1288,8 @@ function setupDirectUpload() {
 
 // Admin Upload Queue Setup
 window.adminBatchQueue = new FaceDetectorUtils.BatchUploadQueue({
-  concurrency: 2,
+  concurrency: 1,
+  maxQueueSize: ADMIN_MAX_UPLOAD_QUEUE,
   maxRetries: 3,
   isPublic: true,
   onItemChange: (item, action) => {
@@ -1342,14 +1343,32 @@ async function handleAdminFilesAdded(fileList) {
     window.adminBatchQueue.isPublic = isPublicCheckbox.checked;
   }
 
+  const currentCount = window.adminBatchQueue.queue.length;
+  const availableSlots = ADMIN_MAX_UPLOAD_QUEUE - currentCount;
+
+  if (availableSlots <= 0) {
+    alert(`Maximum limit of ${ADMIN_MAX_UPLOAD_QUEUE} photos reached in upload queue.`);
+    return;
+  }
+
   const validFiles = [];
+  let skippedCount = 0;
+
   for (let i = 0; i < fileList.length; i++) {
     const file = fileList[i];
     if (file.size > ADMIN_MAX_UPLOAD_SIZE) {
       alert(`${file.name} is too large. Max size allowed is 50 MB.`);
       continue;
     }
-    validFiles.push(file);
+    if (validFiles.length < availableSlots) {
+      validFiles.push(file);
+    } else {
+      skippedCount++;
+    }
+  }
+
+  if (skippedCount > 0) {
+    alert(`Maximum batch upload limit is ${ADMIN_MAX_UPLOAD_QUEUE} photos. ${skippedCount} file(s) were excluded.`);
   }
 
   window.adminBatchQueue.addFiles(validFiles);

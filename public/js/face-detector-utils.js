@@ -283,7 +283,7 @@
    */
   let detectionQueueChain = Promise.resolve();
 
-  const MAX_FACES_PER_PHOTO = 50;
+  const MAX_FACES_PER_PHOTO = 15;
   const MIN_BOX_DIM = 18;
   const MIN_BOX_AREA = 350;
 
@@ -445,6 +445,13 @@
       } catch (err) {
         console.warn('[Face Detection Pipeline] Browser face detection exception, falling back to server-side detection:', err.message);
         descriptors = [];
+      } finally {
+        try {
+          const ctx = canvas.getContext('2d');
+          if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+          canvas.width = 0;
+          canvas.height = 0;
+        } catch (e) {}
       }
     }
 
@@ -466,7 +473,8 @@
    */
   class BatchUploadQueue {
     constructor(options = {}) {
-      this.concurrency = options.concurrency || 2;
+      this.concurrency = options.concurrency || 1;
+      this.maxQueueSize = options.maxQueueSize || 15;
       this.maxRetries = options.maxRetries || 3;
       this.isPublic = options.isPublic !== undefined ? options.isPublic : true;
       this.onItemChange = options.onItemChange || (() => {});
@@ -481,6 +489,9 @@
     addFiles(fileList) {
       const addedItems = [];
       for (let i = 0; i < fileList.length; i++) {
+        if (this.queue.length >= this.maxQueueSize) {
+          break;
+        }
         const file = fileList[i];
         if (this.queue.some(item => item.file.name === file.name && item.file.size === file.size)) {
           continue; // Skip duplicate
