@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { google } = require('googleapis');
+const { execFile } = require('child_process');
 const {
   isFirebaseEnabled,
   readGalleryDb,
@@ -838,15 +839,18 @@ app.get('/api/gallery', async (req, res) => {
 
 let uploadProcessingQueue = Promise.resolve();
 
-const { execFile } = require('child_process');
+let workingPythonCmd = null;
 
 function runPythonFaceDetector(filePath) {
-  const cmds = [
-    'C:\\Users\\SOURAV SENAPATI\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
+  const defaultCmds = [
     'python',
     'python3',
-    'py'
+    'py',
+    'C:\\Users\\SOURAV SENAPATI\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'
   ];
+  const cmds = workingPythonCmd
+    ? [workingPythonCmd, ...defaultCmds.filter(c => c !== workingPythonCmd)]
+    : defaultCmds;
   
   const tryPythonCommand = (index) => {
     if (index >= cmds.length) {
@@ -859,18 +863,18 @@ function runPythonFaceDetector(filePath) {
 
       execFile(cmd, [scriptPath, filePath], { timeout: 35000 }, (error, stdout, stderr) => {
         if (error) {
-          if (error.code === 'ENOENT' || error.code === 127) {
-            return tryPythonCommand(index + 1).then(resolve);
-          }
           console.warn(`[Python Face Detector] Error executing '${cmd}':`, error.message);
-          return resolve({ success: false, faces: [], error: stderr || error.message });
+          return tryPythonCommand(index + 1).then(resolve);
         }
         try {
           const result = JSON.parse(stdout);
-          resolve(result);
+          if (result && result.success !== undefined) {
+            return resolve(result);
+          }
+          tryPythonCommand(index + 1).then(resolve);
         } catch (parseErr) {
-          console.warn(`[Python Face Detector] Failed to parse stdout:`, stdout);
-          resolve({ success: false, faces: [], error: `Failed to parse Python output` });
+          console.warn(`[Python Face Detector] Failed to parse stdout from '${cmd}':`, stdout);
+          tryPythonCommand(index + 1).then(resolve);
         }
       });
     });
@@ -881,10 +885,10 @@ function runPythonFaceDetector(filePath) {
 
 function verifyPythonSetup() {
   const cmds = [
-    'C:\\Users\\SOURAV SENAPATI\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
     'python',
     'python3',
-    'py'
+    'py',
+    'C:\\Users\\SOURAV SENAPATI\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'
   ];
   const testScript = "import sys; import face_recognition; import PIL; import numpy; print('OK')";
 
@@ -897,6 +901,7 @@ function verifyPythonSetup() {
     const cmd = cmds[index];
     execFile(cmd, ['-c', testScript], (error, stdout, stderr) => {
       if (!error && stdout.trim().includes('OK')) {
+        workingPythonCmd = cmd;
         console.log(`[Startup] Python setup verified successfully using '${cmd}' command.`);
       } else {
         tryCheck(index + 1);
