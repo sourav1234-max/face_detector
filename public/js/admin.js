@@ -75,123 +75,21 @@ function resizeImageIfNeeded(file, maxDim = 2048) {
 }
 
 async function loadFaceApiModels() {
-  if (window.faceApiLoaded) return;
-  if (typeof faceapi === 'undefined') {
-    throw new Error('face-api.js is not loaded. Refresh the page and try again.');
+  if (window.FaceDetectorUtils) {
+    return window.FaceDetectorUtils.loadFaceApiModels();
   }
-
-  try {
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
-      faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath),
-      faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
-      faceapi.nets.faceRecognitionNet.loadFromUri(modelPath)
-    ]);
-    window.faceApiLoaded = true;
-  } catch (err) {
-    console.warn('Local face-api models failed, falling back to CDN:', err);
-    modelPath = CDN_MODEL_PATH;
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
-      faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath),
-      faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
-      faceapi.nets.faceRecognitionNet.loadFromUri(modelPath)
-    ]);
-    window.faceApiLoaded = true;
-  }
-}
-
-function loadImageElement(source) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Could not load image for face detection.'));
-    if (source instanceof File || source instanceof Blob) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        img.src = e.target.result;
-      };
-      reader.onerror = () => reject(new Error('Failed to read file.'));
-      reader.readAsDataURL(source);
-    } else {
-      img.src = source;
-    }
-  });
-}
-
-function computeIoU(boxA, boxB) {
-  const x1 = Math.max(boxA.left, boxB.left);
-  const y1 = Math.max(boxA.top, boxB.top);
-  const x2 = Math.min(boxA.right, boxB.right);
-  const y2 = Math.min(boxA.bottom, boxB.bottom);
-  const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-  const areaA = Math.max(0, boxA.right - boxA.left) * Math.max(0, boxA.bottom - boxA.top);
-  const areaB = Math.max(0, boxB.right - boxB.left) * Math.max(0, boxB.bottom - boxB.top);
-  return areaA + areaB === 0 ? 0 : intersection / (areaA + areaB - intersection);
-}
-
-function mergeFaceDetections(primary, fallback) {
-  const merged = [...primary];
-  fallback.forEach(fallbackDetection => {
-    const fallbackBox = {
-      left: fallbackDetection.detection.box.left,
-      top: fallbackDetection.detection.box.top,
-      right: fallbackDetection.detection.box.left + fallbackDetection.detection.box.width,
-      bottom: fallbackDetection.detection.box.top + fallbackDetection.detection.box.height
-    };
-    const duplicate = merged.some(existing => {
-      const existingBox = {
-        left: existing.detection.box.left,
-        top: existing.detection.box.top,
-        right: existing.detection.box.left + existing.detection.box.width,
-        bottom: existing.detection.box.top + existing.detection.box.height
-      };
-      return computeIoU(existingBox, fallbackBox) > 0.45;
-    });
-    if (!duplicate) merged.push(fallbackDetection);
-  });
-  return merged;
 }
 
 async function computeFaceDescriptors(source) {
-  await loadFaceApiModels();
-  const img = await loadImageElement(source);
-  const mapDetections = (detections) => detections.map(detection => ({
-    box: {
-      x: Math.round(detection.detection.box.left),
-      y: Math.round(detection.detection.box.top),
-      width: Math.round(detection.detection.box.width),
-      height: Math.round(detection.detection.box.height)
-    },
-    descriptor: Array.from(detection.descriptor)
-  }));
-
-  let detections = await faceapi
-    .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 640, scoreThreshold: 0.25 }))
-    .withFaceLandmarks()
-    .withFaceDescriptors();
-
-  let ssdDetections = [];
-  try {
-    if (!faceapi.nets.ssdMobilenetv1.isLoaded) {
-      await faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath);
-    }
-    ssdDetections = await faceapi
-      .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 }))
-      .withFaceLandmarks()
-      .withFaceDescriptors();
-  } catch (ssdErr) {
-    console.warn('SSD MobileNet detection unavailable:', ssdErr);
+  if (window.FaceDetectorUtils) {
+    const { canvas } = await window.FaceDetectorUtils.createOrientedCanvas(source, 2048);
+    return window.FaceDetectorUtils.detectFacesMultiScale(canvas);
   }
+  return [];
+}
 
-  if (detections.length === 0 && ssdDetections.length > 0) {
-    detections = ssdDetections;
-  } else if (ssdDetections.length > detections.length) {
-    detections = mergeFaceDetections(detections, ssdDetections);
-  }
-
-  return mapDetections(detections);
+async function computeFaceDescriptorsWithTimeout(source) {
+  return computeFaceDescriptors(source);
 }
 
 // Photo URL Helper (local / Google Drive / Firebase Storage)
@@ -1380,6 +1278,50 @@ function setupDirectUpload() {
   }
 }
 
+// Admin Upload Queue Setup
+window.adminBatchQueue = new FaceDetectorUtils.BatchUploadQueue({
+  concurrency: 2,
+  maxRetries: 3,
+  isPublic: true,
+  onItemChange: (item, action) => {
+    if (action === 'added') {
+      renderAdminQueueItem(item);
+    } else if (action === 'removed') {
+      const el = document.getElementById(item.id);
+      if (el) el.remove();
+    } else if (action === 'updated') {
+      updateAdminQueueItemUI(item);
+    }
+    updateAdminQueueCount();
+  },
+  onProgress: ({ completed, total, percentage }) => {
+    const progressBar = document.getElementById('admin-upload-progress-fill');
+    const statusText = document.getElementById('admin-queue-status-text');
+    if (progressBar) progressBar.style.width = `${percentage}%`;
+    if (statusText) statusText.innerText = total > 0 ? `Processing admin uploads (${completed}/${total})...` : 'Images loaded.';
+  },
+  onComplete: async (queue) => {
+    const startUploadBtn = document.getElementById('admin-start-upload-btn');
+    const clearQueueBtn = document.getElementById('admin-clear-queue-btn');
+    const progressBar = document.getElementById('admin-upload-progress-fill');
+    const statusText = document.getElementById('admin-queue-status-text');
+
+    const successCount = queue.filter(i => i.status === 'done').length;
+    if (statusText) {
+      statusText.innerHTML = `<span style='color:var(--success)'><i class='fa-solid fa-circle-check'></i> Successfully uploaded ${successCount}/${queue.length} photo(s)!</span>`;
+    }
+    if (progressBar) progressBar.style.width = '100%';
+
+    setTimeout(() => {
+      if (progressBar) progressBar.style.width = '0%';
+      if (startUploadBtn) startUploadBtn.classList.remove('disabled');
+      if (clearQueueBtn) clearQueueBtn.classList.remove('disabled');
+    }, 2000);
+
+    await loadDashboardData();
+  }
+});
+
 async function handleAdminFilesAdded(fileList) {
   const queueContainer = document.getElementById('admin-upload-queue-container');
   if (queueContainer) {
@@ -1387,63 +1329,33 @@ async function handleAdminFilesAdded(fileList) {
     queueContainer.classList.remove('hidden');
   }
 
-  const statusText = document.getElementById('admin-queue-status-text');
-  if (statusText) {
-    statusText.innerText = "Images loaded.";
+  const isPublicCheckbox = document.getElementById('admin-upload-public-checkbox');
+  if (isPublicCheckbox) {
+    window.adminBatchQueue.isPublic = isPublicCheckbox.checked;
   }
 
+  const validFiles = [];
   for (let i = 0; i < fileList.length; i++) {
     const file = fileList[i];
-    // Reject files bigger than limit
     if (file.size > ADMIN_MAX_UPLOAD_SIZE) {
-      alert(file.name + " is too large. Please select files up to 50 MB.");
+      alert(`${file.name} is too large. Max size allowed is 50 MB.`);
       continue;
     }
-
-    // Prevent too many files queued client-side
-    if (window.adminUploadQueue.length >= ADMIN_MAX_UPLOAD_QUEUE) {
-      alert('Admin upload queue limit reached. Please upload existing files or reduce selection.');
-      break;
-    }
-
-    // Avoid duplicates by name
-    if (window.adminUploadQueue.some(item => item.file.name === file.name)) continue;
-
-    const queueId = 'aqi_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-    const queueItem = {
-      id: queueId,
-      file: file,
-      status: 'ready', // Immediately ready for upload
-      faces: [],
-      error: null
-    };
-
-    window.adminUploadQueue.push(queueItem);
-    renderAdminQueueItem(queueItem);
+    validFiles.push(file);
   }
 
-  updateAdminQueueCount();
+  window.adminBatchQueue.addFiles(validFiles);
 }
 
 function renderAdminQueueItem(item) {
   const carousel = document.getElementById('admin-preview-carousel');
   if (!carousel) return;
-  
+
   const itemEl = document.createElement('div');
   itemEl.className = 'preview-item';
   itemEl.id = item.id;
 
-  const url = URL.createObjectURL(item.file);
-  item.objectUrl = url;
-
-  // Revoke object URL after image loads to free memory
-  const tempImg = new Image();
-  tempImg.onload = () => {
-    try { URL.revokeObjectURL(url); } catch (e) {}
-    // clear stored objectUrl reference (item removal will check)
-    item.objectUrl = null;
-  };
-  tempImg.src = url;
+  const url = item.objectUrl || URL.createObjectURL(item.file);
 
   itemEl.innerHTML = `
     <div class="preview-thumbnail-wrapper">
@@ -1452,7 +1364,7 @@ function renderAdminQueueItem(item) {
     <div class="preview-info">
       <div class="preview-name">${item.file.name}</div>
       <div class="preview-status ready" id="${item.id}-status">
-        <i class="fa-solid fa-circle-check" style="color:#10b981"></i> Loaded
+        <i class="fa-solid fa-clock" style="color:#a78bfa"></i> Queued
       </div>
     </div>
     <button class="preview-remove-btn" onclick="removeAdminQueueItem('${item.id}')">
@@ -1464,40 +1376,46 @@ function renderAdminQueueItem(item) {
   carousel.scrollTop = carousel.scrollHeight;
 }
 
-window.removeAdminQueueItem = function(id) {
-  const idx = window.adminUploadQueue.findIndex(item => item.id === id);
-  if (idx > -1) {
-    const item = window.adminUploadQueue[idx];
-    if (item.objectUrl) {
-      URL.revokeObjectURL(item.objectUrl);
-    }
-    window.adminUploadQueue.splice(idx, 1);
-    const el = document.getElementById(id);
-    if (el) el.remove();
-    updateAdminQueueCount();
+function updateAdminQueueItemUI(item) {
+  const statusEl = document.getElementById(`${item.id}-status`);
+  if (!statusEl) return;
+
+  if (item.status === 'queued') {
+    statusEl.className = 'preview-status ready';
+    statusEl.innerHTML = `<i class="fa-solid fa-clock" style="color:#a78bfa"></i> Queued`;
+  } else if (item.status === 'detecting') {
+    statusEl.className = 'preview-status ready';
+    statusEl.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin" style="color:#3b82f6"></i> Detecting faces...`;
+  } else if (item.status === 'uploading') {
+    statusEl.className = 'preview-status ready';
+    statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce" style="color:#8b5cf6"></i> Uploading...`;
+  } else if (item.status === 'done') {
+    statusEl.className = 'preview-status ready';
+    const label = item.faceCount > 0 ? `Uploaded · ${item.faceCount} face(s)` : 'Uploaded · no face';
+    statusEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> ${label}`;
+  } else if (item.status === 'failed') {
+    statusEl.className = 'preview-status failed';
+    statusEl.innerHTML = `<i class="fa-solid fa-circle-exclamation" style="color:#ef4444"></i> ${item.error || 'Failed'}`;
   }
+}
+
+window.removeAdminQueueItem = function(id) {
+  window.adminBatchQueue.removeItem(id);
 };
 
 function updateAdminQueueCount() {
   const countSpan = document.getElementById('admin-queue-count');
-  if (countSpan) {
-    countSpan.innerText = window.adminUploadQueue.length;
-  }
+  if (countSpan) countSpan.innerText = window.adminBatchQueue.queue.length;
 
   const container = document.getElementById('admin-upload-queue-container');
-  if (container && window.adminUploadQueue.length === 0) {
+  if (container && window.adminBatchQueue.queue.length === 0) {
     container.style.display = 'none';
     container.classList.add('hidden');
   }
 }
 
 function clearAdminQueue() {
-  window.adminUploadQueue.forEach(item => {
-    if (item.objectUrl) {
-      URL.revokeObjectURL(item.objectUrl);
-    }
-  });
-  window.adminUploadQueue = [];
+  window.adminBatchQueue.clear();
   const carousel = document.getElementById('admin-preview-carousel');
   if (carousel) carousel.innerHTML = '';
   updateAdminQueueCount();
@@ -1506,112 +1424,19 @@ function clearAdminQueue() {
 async function startAdminBatchUpload() {
   const startUploadBtn = document.getElementById('admin-start-upload-btn');
   const clearQueueBtn = document.getElementById('admin-clear-queue-btn');
-  const progressBar = document.getElementById('admin-upload-progress-fill');
-  const statusText = document.getElementById('admin-queue-status-text');
   const isPublicCheckbox = document.getElementById('admin-upload-public-checkbox');
 
-  const uploadable = window.adminUploadQueue.filter(item => item.status === 'ready');
-  if (uploadable.length === 0) {
+  if (window.adminBatchQueue.queue.length === 0) {
     alert("No photos in queue ready for upload.");
     return;
+  }
+
+  if (isPublicCheckbox) {
+    window.adminBatchQueue.isPublic = isPublicCheckbox.checked;
   }
 
   if (startUploadBtn) startUploadBtn.classList.add('disabled');
   if (clearQueueBtn) clearQueueBtn.classList.add('disabled');
 
-  let successCount = 0;
-  if (progressBar) progressBar.style.width = '0%';
-
-  for (let i = 0; i < uploadable.length; i++) {
-    const item = uploadable[i];
-    item.status = 'uploading';
-    const statusEl = document.getElementById(`${item.id}-status`);
-    if (statusEl) {
-      statusEl.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting faces...`;
-    }
-
-    try {
-      const resizedFile = await resizeImageIfNeeded(item.file);
-      
-      let descriptors = [];
-      try {
-        if (window.faceApiLoaded) {
-          descriptors = await computeFaceDescriptorsWithTimeout(resizedFile, 10000);
-        } else {
-          console.log('Face-api models not loaded yet, offloading detection to server...');
-        }
-      } catch (faceErr) {
-        console.warn('Browser face detection failed or timed out during admin upload:', faceErr);
-      }
-
-      if (statusEl) {
-        statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce"></i> Uploading...`;
-      }
-
-      const formData = new FormData();
-      formData.append('isPublic', isPublicCheckbox ? isPublicCheckbox.checked : true);
-      formData.append('descriptors', JSON.stringify(descriptors));
-      formData.append('photo', resizedFile);
-
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: formData
-      });
-      const result = await response.json();
-      if (result.success) {
-        successCount++;
-        item.status = 'done';
-        if (statusEl) {
-          statusEl.className = 'preview-status ready';
-          const serverFaces = result.photo && result.photo.descriptors ? result.photo.descriptors.length : 0;
-          const faceLabel = serverFaces > 0
-            ? `Uploaded · ${serverFaces} face(s)`
-            : 'Uploaded · no face detected';
-          statusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${faceLabel}`;
-        }
-
-        setTimeout(() => {
-          const el = document.getElementById(item.id);
-          if (el) el.remove();
-          if (item.objectUrl) {
-            URL.revokeObjectURL(item.objectUrl);
-          }
-          window.adminUploadQueue = window.adminUploadQueue.filter(q => q.id !== item.id);
-          updateAdminQueueCount();
-        }, 1000);
-      } else {
-        item.status = 'failed';
-        if (statusEl) {
-          statusEl.className = 'preview-status failed';
-          statusEl.innerHTML = `<i class="fa-solid fa-xmark"></i> Server error`;
-        }
-      }
-    } catch (err) {
-      console.error("Upload failed:", err);
-      item.status = 'failed';
-      if (statusEl) {
-        statusEl.className = 'preview-status failed';
-        statusEl.innerHTML = `<i class="fa-solid fa-xmark"></i> Upload failed`;
-      }
-    }
-
-    const completedCount = uploadable.filter(q => q.status === 'done' || q.status === 'failed').length;
-    const pct = Math.round((completedCount / uploadable.length) * 100);
-    if (progressBar) progressBar.style.width = `${pct}%`;
-    if (statusText) statusText.innerText = `Uploading images (${completedCount}/${uploadable.length})...`;
-  }
-
-  if (statusText) {
-    statusText.innerHTML = `<span style='color:var(--success)'><i class='fa-solid fa-circle-check'></i> Successfully uploaded ${successCount}/${uploadable.length} photos!</span>`;
-  }
-  if (progressBar) progressBar.style.width = '100%';
-
-  setTimeout(() => {
-    if (progressBar) progressBar.style.width = '0%';
-    if (startUploadBtn) startUploadBtn.classList.remove('disabled');
-    if (clearQueueBtn) clearQueueBtn.classList.remove('disabled');
-  }, 2000);
-
-  await loadDashboardData();
+  window.adminBatchQueue.start();
 }

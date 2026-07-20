@@ -82,12 +82,17 @@ def main():
                 orig_top = int(top * scale_y)
                 orig_right = int(right * scale_x)
                 orig_bottom = int(bottom * scale_y)
+                width = orig_right - orig_left
+                height = orig_bottom - orig_top
+
+                if width < 15 or height < 15:
+                    continue
 
                 box = {
                     "x": orig_left,
                     "y": orig_top,
-                    "width": orig_right - orig_left,
-                    "height": orig_bottom - orig_top,
+                    "width": width,
+                    "height": height,
                 }
 
                 faces.append({
@@ -95,6 +100,7 @@ def main():
                     "descriptor": list(encoding),
                 })
 
+            faces = faces[:50]
             print(json.dumps({"success": True, "faces": faces}))
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))

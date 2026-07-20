@@ -861,28 +861,36 @@ let uploadProcessingQueue = Promise.resolve();
 const { execFile } = require('child_process');
 
 function runPythonFaceDetector(filePath) {
-  const cmds = ['python', 'python3', 'py'];
+  const cmds = [
+    'C:\\Users\\SOURAV SENAPATI\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
+    'python',
+    'python3',
+    'py'
+  ];
   
   const tryPythonCommand = (index) => {
-    return new Promise((resolve, reject) => {
+    if (index >= cmds.length) {
+      return Promise.resolve({ success: false, faces: [], error: 'Python interpreter not available on host system.' });
+    }
+
+    return new Promise((resolve) => {
       const cmd = cmds[index];
       const scriptPath = path.join(__dirname, 'detect_faces.py');
-      execFile(cmd, [scriptPath, filePath], (error, stdout, stderr) => {
+
+      execFile(cmd, [scriptPath, filePath], { timeout: 35000 }, (error, stdout, stderr) => {
         if (error) {
-          if (error.code === 'ENOENT' && index < cmds.length - 1) {
-            console.warn(`[Python Face Detector] '${cmd}' command not found, trying '${cmds[index + 1]}'...`);
-            return tryPythonCommand(index + 1).then(resolve, reject);
+          if (error.code === 'ENOENT' || error.code === 127) {
+            return tryPythonCommand(index + 1).then(resolve);
           }
-          console.error(`[Python Face Detector] error with '${cmd}':`, error);
-          console.error(`[Python Face Detector] stderr:`, stderr);
-          return reject(new Error(stderr || error.message));
+          console.warn(`[Python Face Detector] Error executing '${cmd}':`, error.message);
+          return resolve({ success: false, faces: [], error: stderr || error.message });
         }
         try {
           const result = JSON.parse(stdout);
           resolve(result);
         } catch (parseErr) {
-          console.error(`[Python Face Detector] Failed to parse stdout from '${cmd}':`, stdout);
-          reject(new Error(`Failed to parse Python output: ${stdout}`));
+          console.warn(`[Python Face Detector] Failed to parse stdout:`, stdout);
+          resolve({ success: false, faces: [], error: `Failed to parse Python output` });
         }
       });
     });
@@ -892,7 +900,12 @@ function runPythonFaceDetector(filePath) {
 }
 
 function verifyPythonSetup() {
-  const cmds = ['python', 'python3', 'py'];
+  const cmds = [
+    'C:\\Users\\SOURAV SENAPATI\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
+    'python',
+    'python3',
+    'py'
+  ];
   const testScript = "import sys; import face_recognition; import PIL; import numpy; print('OK')";
 
   const tryCheck = (index) => {
@@ -903,7 +916,7 @@ function verifyPythonSetup() {
     }
     const cmd = cmds[index];
     execFile(cmd, ['-c', testScript], (error, stdout, stderr) => {
-      if (!error && stdout.trim() === 'OK') {
+      if (!error && stdout.trim().includes('OK')) {
         console.log(`[Startup] Python setup verified successfully using '${cmd}' command.`);
       } else {
         tryCheck(index + 1);
@@ -924,13 +937,21 @@ async function processUploadTask(req) {
   let descriptors = [];
   if (req.body.descriptors) {
     try {
-      descriptors = typeof req.body.descriptors === 'string'
+      const parsed = typeof req.body.descriptors === 'string'
         ? JSON.parse(req.body.descriptors)
         : req.body.descriptors;
+      if (Array.isArray(parsed)) {
+        descriptors = parsed.filter(item => item && Array.isArray(item.descriptor) && item.descriptor.length === 128);
+      }
     } catch (parseErr) {
       console.warn('Invalid descriptors payload on upload, storing empty face descriptors.');
       descriptors = [];
     }
+  }
+
+  if (descriptors.length > 50) {
+    console.warn(`[Upload] Image ${req.file.originalname} had ${descriptors.length} face descriptors. Capping at 50.`);
+    descriptors = descriptors.slice(0, 50);
   }
 
   const storageMode = getStorageMode(settings);
@@ -952,32 +973,40 @@ async function processUploadTask(req) {
 
   // Run server-side face detection fallback if no descriptors provided
   if (!descriptors || descriptors.length === 0) {
-    console.log(`[Upload] Running server-side face detection fallback for ${originalFileName}...`);
-    try {
-      const tempDir = path.join(__dirname, 'scratch');
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-      const tempPath = path.join(tempDir, `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${ext}`);
-      fs.writeFileSync(tempPath, buffer);
-
+    if (process.env.VERCEL) {
+      console.log(`[Upload] Vercel Serverless Mode: No client face descriptors provided for ${originalFileName}. Saving photo with empty descriptors.`);
+      faceDetectionError = 'No face detected during client upload';
+    } else {
+      console.log(`[Upload] Running server-side face detection fallback for ${originalFileName}...`);
       try {
-        const detectResult = await runPythonFaceDetector(tempPath);
-        if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
-          descriptors = detectResult.faces;
-          console.log(`[Upload] Server-side detection found ${descriptors.length} face(s) in ${originalFileName}.`);
-        } else {
-          faceDetectionError = detectResult ? detectResult.error : 'No response from python detector';
-          console.warn(`[Upload] Server-side detection failed or returned no faces:`, faceDetectionError);
+        const tempDir = path.join(__dirname, 'scratch');
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
         }
-      } finally {
-        if (fs.existsSync(tempPath)) {
-          fs.unlinkSync(tempPath);
+        const tempPath = path.join(tempDir, `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${ext}`);
+        fs.writeFileSync(tempPath, buffer);
+
+        try {
+          const detectResult = await runPythonFaceDetector(tempPath);
+          if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
+            descriptors = detectResult.faces.slice(0, 50);
+            console.log(`[Upload] Server-side detection found ${descriptors.length} face(s) in ${originalFileName}.`);
+          } else {
+            faceDetectionError = detectResult ? detectResult.error : 'No response from python detector';
+            console.warn(`[Upload] Server-side detection returned no faces:`, faceDetectionError);
+          }
+        } catch (pyErr) {
+          console.warn(`[Upload] Server-side python face detector unavailable:`, pyErr.message);
+          faceDetectionError = 'Server-side Python face detector unavailable';
+        } finally {
+          if (fs.existsSync(tempPath)) {
+            try { fs.unlinkSync(tempPath); } catch (e) {}
+          }
         }
+      } catch (detectErr) {
+        console.error(`[Upload] Server-side face detection error:`, detectErr.message);
+        faceDetectionError = detectErr.message;
       }
-    } catch (detectErr) {
-      console.error(`[Upload] Server-side face detection error:`, detectErr.message);
-      faceDetectionError = detectErr.message;
     }
   }
 
