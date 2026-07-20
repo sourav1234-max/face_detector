@@ -167,18 +167,31 @@
     ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
     ctx.restore();
 
+    // If image is horizontal (width > height), rotate 90 degrees clockwise to make it vertical (portrait)
+    let finalCanvas = canvas;
+    if (canvas.width > canvas.height) {
+      const vertCanvas = document.createElement('canvas');
+      vertCanvas.width = canvas.height;
+      vertCanvas.height = canvas.width;
+      const vertCtx = vertCanvas.getContext('2d');
+      vertCtx.translate(vertCanvas.width / 2, vertCanvas.height / 2);
+      vertCtx.rotate(90 * Math.PI / 180);
+      vertCtx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+      finalCanvas = vertCanvas;
+    }
+
     // Export optimized Blob and File
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    const blob = await new Promise((resolve) => finalCanvas.toBlob(resolve, 'image/jpeg', 0.85));
     const baseName = fileName.replace(/\.[^/.]+$/, '');
     const resizedFile = new File([blob], `${baseName}.jpg`, {
       type: 'image/jpeg',
       lastModified: Date.now()
     });
 
-    console.log(`[Image Processor] Processed ${fileName}: ${origWidth}x${origHeight} -> ${canvas.width}x${canvas.height} (EXIF Orientation: ${orientation}, Size: ${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`[Image Processor] Processed ${fileName}: ${origWidth}x${origHeight} -> ${finalCanvas.width}x${finalCanvas.height} (EXIF Orientation: ${orientation}, Vertical: ${finalCanvas.height >= finalCanvas.width}, Size: ${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
 
     return {
-      canvas,
+      canvas: finalCanvas,
       blob,
       file: resizedFile,
       originalWidth: origWidth,

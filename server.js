@@ -943,7 +943,7 @@ async function processUploadTask(req) {
     console.warn('Firebase is not configured. Photo metadata will be stored locally when possible.');
   }
 
-  const uploadedBy = isAdmin ? 'admin' : (req.ip || req.headers['x-forwarded-for'] || 'anonymous');
+  const uploadedBy = isAdmin ? 'admin' : 'public';
   const uploadTime = new Date().toISOString();
   const fileSize = req.file.size || 0;
   const mimeType = req.file.mimetype || 'application/octet-stream';
@@ -968,6 +968,13 @@ async function processUploadTask(req) {
 
         try {
           const detectResult = await runPythonFaceDetector(tempPath);
+          if (fs.existsSync(tempPath)) {
+            try {
+              buffer = fs.readFileSync(tempPath);
+            } catch (readErr) {
+              console.warn('[Upload] Failed to reload rotated image buffer from tempPath:', readErr.message);
+            }
+          }
           if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
             descriptors = detectResult.faces.slice(0, 15);
             console.log(`[Upload] Server-side detection found ${descriptors.length} face(s) in ${originalFileName}.`);
@@ -1128,7 +1135,12 @@ app.post('/api/search', async (req, res) => {
 
     const gallery = await readGalleryDb();
     const matches = [];
-    const approvedPhotos = gallery.filter(photo => photo.status === 'approved');
+    const isAdmin = await isValidAdminSession(req);
+    const approvedPhotos = gallery.filter(photo => {
+      const status = photo.status === undefined ? 'approved' : photo.status;
+      const isPublic = photo.isPublic === undefined ? true : photo.isPublic;
+      return isAdmin ? status === 'approved' : (status === 'approved' && isPublic === true);
+    });
 
     approvedPhotos.forEach(photo => {
       if (!photo.descriptors || photo.descriptors.length === 0) return;
@@ -1415,6 +1427,7 @@ app.post('/api/admin/update-status', checkAdminAuth, async (req, res) => {
   }
 
   const patch = { status };
+  if (status === 'approved') patch.isPublic = true;
   if (status === 'rejected') patch.isPublic = false;
   const photo = await updatePhoto(id, patch);
   if (!photo) return res.status(404).json({ success: false, error: 'Photo not found' });
@@ -1454,6 +1467,7 @@ app.post('/api/admin/bulk-status', checkAdminAuth, async (req, res) => {
 
     if (shouldUpdate) {
       const patch = { status };
+      if (status === 'approved') patch.isPublic = true;
       if (status === 'rejected') patch.isPublic = false;
       await updatePhoto(photo.id, patch);
       updatedCount++;

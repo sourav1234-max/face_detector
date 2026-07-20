@@ -63,7 +63,19 @@ async function resizeImageIfNeeded(file, maxDim = 2048) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, newWidth, newHeight);
 
-        canvas.toBlob((blob) => {
+        let finalCanvas = canvas;
+        if (canvas.width > canvas.height) {
+          const vertCanvas = document.createElement('canvas');
+          vertCanvas.width = canvas.height;
+          vertCanvas.height = canvas.width;
+          const vertCtx = vertCanvas.getContext('2d');
+          vertCtx.translate(vertCanvas.width / 2, vertCanvas.height / 2);
+          vertCtx.rotate(90 * Math.PI / 180);
+          vertCtx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+          finalCanvas = vertCanvas;
+        }
+
+        finalCanvas.toBlob((blob) => {
           if (!blob) {
             return resolve(file);
           }
@@ -564,6 +576,11 @@ function renderModerationTable() {
       </div>
     `;
 
+    const isAdminUpload = photo.uploadedBy === 'admin';
+    const uploaderBadge = isAdminUpload
+      ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;"><i class="fa-solid fa-user-shield"></i> Admin</span>`
+      : `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;"><i class="fa-solid fa-user"></i> Public</span>`;
+
     tr.innerHTML = `
         <td>
           <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="thumb-img" loading="lazy" alt="Thumbnail" onclick="openAdminLightbox('${photo.id}')">
@@ -571,6 +588,7 @@ function renderModerationTable() {
       <td style="font-weight: 500; font-size:13px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${photo.originalName}">
         ${photo.originalName}
       </td>
+      <td>${uploaderBadge}</td>
       <td style="color: var(--text-secondary); font-size: 13px;">${dateStr}</td>
       <td style="font-weight: 600;"><i class="fa-solid fa-user-tag" style="color: var(--primary);"></i> ${facesCount}</td>
       <td>${statusBadge}</td>
