@@ -107,9 +107,10 @@
     let orientation = 1;
     let fileName = 'photo.jpg';
 
-    if (source instanceof File) {
+    if (source instanceof Blob) {
       fileName = source.name || fileName;
-      if (source.type === 'image/jpeg' || source.name.match(/\.jpe?g$/i)) {
+      const isJpeg = !source.type || source.type === 'image/jpeg' || (source.name && source.name.match(/\.jpe?g$/i));
+      if (isJpeg) {
         try {
           const buffer = await readFileAsArrayBuffer(source);
           orientation = getExifOrientation(buffer);

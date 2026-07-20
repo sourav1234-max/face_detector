@@ -119,10 +119,35 @@ async function fetchGallery() {
   }
 }
 
+async function resizeImageIfNeeded(file, maxDim = 2048) {
+  if (!file || !(file instanceof File || file instanceof Blob)) {
+    return file;
+  }
+  if (window.FaceDetectorUtils && typeof window.FaceDetectorUtils.createOrientedCanvas === 'function') {
+    try {
+      const oriented = await window.FaceDetectorUtils.createOrientedCanvas(file, maxDim);
+      return oriented.file;
+    } catch (e) {
+      console.warn('[Image Resizer] createOrientedCanvas failed:', e);
+    }
+  }
+  return file;
+}
+
 // Upload photo with client-side descriptors
 async function uploadPhoto(file, descriptors = []) {
+  let fileToUpload = file;
+  if (window.FaceDetectorUtils && typeof window.FaceDetectorUtils.createOrientedCanvas === 'function') {
+    try {
+      const oriented = await window.FaceDetectorUtils.createOrientedCanvas(file, 2048);
+      fileToUpload = oriented.file;
+    } catch (e) {
+      console.warn('createOrientedCanvas fallback in uploadPhoto:', e);
+    }
+  }
+
   const formData = new FormData();
-  formData.append('photo', file);
+  formData.append('photo', fileToUpload);
   formData.append('descriptors', JSON.stringify(descriptors));
 
   try {
@@ -705,6 +730,11 @@ async function handleSearchFileSelected(file) {
         }
       }
 
+      // Limit to only 1 face for "Find My Photo" search
+      if (descriptors && descriptors.length > 1) {
+        descriptors = descriptors.slice(0, 1);
+      }
+
       window.searchQueryDescriptors = descriptors;
       window.searchQueryDescriptor = descriptors && descriptors.length > 0 ? descriptors[0].descriptor : null;
 
@@ -713,9 +743,8 @@ async function handleSearchFileSelected(file) {
         feedbackDesc.innerText = 'We could not detect any face in this image on the browser or server. Please choose a different photo.';
         searchBtn.classList.add('disabled');
       } else {
-        const faceCount = descriptors.length;
-        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face${faceCount > 1 ? 's' : ''} Detected`;
-        feedbackDesc.innerText = `Ready to search the gallery using ${faceCount} face(s) (detected via server/browser).`;
+        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face Detected`;
+        feedbackDesc.innerText = `Ready to search the gallery using 1 detected face.`;
         searchBtn.classList.remove('disabled');
         
         // Auto-run search for best user experience
@@ -858,6 +887,11 @@ async function captureCameraSearch() {
       }
     }
 
+    // Limit to only 1 face for "Find My Photo" search
+    if (descriptors && descriptors.length > 1) {
+      descriptors = descriptors.slice(0, 1);
+    }
+
     window.searchQueryDescriptors = descriptors;
     window.searchQueryDescriptor = descriptors && descriptors.length > 0 ? descriptors[0].descriptor : null;
 
@@ -868,9 +902,8 @@ async function captureCameraSearch() {
       return;
     }
 
-    const faceCount = descriptors.length;
     feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Captured!`;
-    feedbackDesc.innerText = `Detected ${faceCount} face(s), searching gallery...`;
+    feedbackDesc.innerText = `Detected 1 face, searching gallery...`;
     document.getElementById('execute-search-btn').classList.remove('disabled');
 
     // Automatically perform search

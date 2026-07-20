@@ -17,12 +17,20 @@ const LOCAL_MODEL_PATH = '/models';
 const CDN_MODEL_PATH = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 let modelPath = LOCAL_MODEL_PATH;
 
-function resizeImageIfNeeded(file, maxDim = 2048) {
-  return new Promise((resolve) => {
-    if (!file || !file.type || !file.type.startsWith('image/')) {
-      return resolve(file);
+async function resizeImageIfNeeded(file, maxDim = 2048) {
+  if (!file || !(file instanceof File || file instanceof Blob) || !file.type || !file.type.startsWith('image/')) {
+    return file;
+  }
+  if (window.FaceDetectorUtils && typeof window.FaceDetectorUtils.createOrientedCanvas === 'function') {
+    try {
+      const oriented = await window.FaceDetectorUtils.createOrientedCanvas(file, maxDim);
+      return oriented.file;
+    } catch (e) {
+      console.warn('[Admin Resizer] createOrientedCanvas failed, falling back:', e);
     }
+  }
 
+  return new Promise((resolve) => {
     const img = new Image();
     const reader = new FileReader();
 
