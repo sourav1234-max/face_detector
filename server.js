@@ -831,17 +831,44 @@ app.get('/api/gallery', async (req, res) => {
       return status === 'approved' && isPublic === true;
     });
 
+    const isAdmin = await isValidAdminSession(req);
+    const publicEvents = events.map(evt => {
+      const item = {
+        ...evt,
+        hasPasscode: !!(evt.passcode && evt.passcode.trim())
+      };
+      if (!isAdmin) delete item.passcode;
+      return item;
+    });
+
     const requestedEventId = req.query.eventId;
     if (requestedEventId && requestedEventId !== 'all') {
+      const targetEvent = events.find(e => e.id === requestedEventId);
+      if (targetEvent && targetEvent.passcode && targetEvent.passcode.trim() && !isAdmin) {
+        const providedPasscode = (req.headers['x-event-passcode'] || req.query.passcode || '').trim();
+        if (providedPasscode !== targetEvent.passcode.trim()) {
+          return res.json({
+            success: true,
+            photos: [],
+            events: publicEvents,
+            publicGalleryEnabled: true,
+            passcodeRequired: true,
+            eventId: requestedEventId,
+            error: 'Passcode required to view this private event.'
+          });
+        }
+      }
       publicPhotos = publicPhotos.filter(photo => photo.eventId === requestedEventId);
     }
 
     res.json({
       success: true,
       photos: publicPhotos,
-      events,
+      events: publicEvents,
       publicGalleryEnabled: true,
       galleryHeading,
+      defaultPublicEventId: settings.defaultPublicEventId || 'all',
+      allowPublicFaceAdjustment: settings.allowPublicFaceAdjustment !== false,
       logoWidth: settings.logoWidth,
       storageMode: getStorageMode(settings),
       galleryMessage: settings.galleryMessage || ''
@@ -856,6 +883,7 @@ app.get('/api/gallery', async (req, res) => {
 
 app.get('/api/events', async (req, res) => {
   try {
+    const isAdmin = await isValidAdminSession(req);
     const events = await readEventsDb();
     const gallery = await readGalleryDb();
     const photoCounts = {};
@@ -864,10 +892,17 @@ app.get('/api/events', async (req, res) => {
         photoCounts[p.eventId] = (photoCounts[p.eventId] || 0) + 1;
       }
     });
-    const eventsWithCount = events.map(evt => ({
-      ...evt,
-      photoCount: photoCounts[evt.id] || 0
-    }));
+    const eventsWithCount = events.map(evt => {
+      const item = {
+        ...evt,
+        photoCount: photoCounts[evt.id] || 0,
+        hasPasscode: !!(evt.passcode && evt.passcode.trim())
+      };
+      if (!isAdmin) {
+        delete item.passcode;
+      }
+      return item;
+    });
     res.json({ success: true, events: eventsWithCount });
   } catch (err) {
     console.error('Fetch events error:', err);
@@ -881,7 +916,7 @@ app.post('/api/events', async (req, res) => {
     if (!isAdmin) {
       return res.status(401).json({ success: false, error: 'Unauthorized access.' });
     }
-    const { title, name, description, date, coverUrl, status } = req.body;
+    const { title, name, description, date, coverUrl, status, passcode, allowDownload, disableRightClick, announcementMessage } = req.body;
     const eventName = (name || title || '').trim();
     if (!eventName) {
       return res.status(400).json({ success: false, error: 'Event name is required.' });
@@ -895,6 +930,10 @@ app.post('/api/events', async (req, res) => {
       date: date || new Date().toISOString().split('T')[0],
       coverUrl: coverUrl || '',
       status: status || 'active',
+      passcode: (passcode || '').trim(),
+      allowDownload: allowDownload !== undefined ? !!allowDownload : true,
+      disableRightClick: disableRightClick !== undefined ? !!disableRightClick : false,
+      announcementMessage: announcementMessage !== undefined ? announcementMessage.trim() : '',
       createdAt: new Date().toISOString()
     };
     await addEvent(newEvent);
@@ -913,7 +952,7 @@ app.put('/api/events/:id', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Unauthorized access.' });
     }
     const { id } = req.params;
-    const { title, name, description, date, coverUrl, status } = req.body;
+    const { title, name, description, date, coverUrl, status, passcode, allowDownload, disableRightClick, announcementMessage } = req.body;
     const patch = {};
     if (title || name) {
       patch.title = (name || title).trim();
@@ -923,6 +962,10 @@ app.put('/api/events/:id', async (req, res) => {
     if (date !== undefined) patch.date = date;
     if (coverUrl !== undefined) patch.coverUrl = coverUrl;
     if (status !== undefined) patch.status = status;
+    if (passcode !== undefined) patch.passcode = (passcode || '').trim();
+    if (allowDownload !== undefined) patch.allowDownload = !!allowDownload;
+    if (disableRightClick !== undefined) patch.disableRightClick = !!disableRightClick;
+    if (announcementMessage !== undefined) patch.announcementMessage = announcementMessage.trim();
 
     const updated = await updateEvent(id, patch);
     if (!updated) {
@@ -951,6 +994,29 @@ app.delete('/api/events/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('Delete event error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/events/:id/verify-passcode', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { passcode } = req.body;
+    const event = await getEventById(id);
+    if (!event) {
+      return res.status(404).json({ success: false, error: 'Event not found.' });
+    }
+    const expectedPasscode = (event.passcode || '').trim();
+    if (!expectedPasscode) {
+      return res.json({ success: true, verified: true });
+    }
+    const enteredPasscode = (passcode || '').trim();
+    if (enteredPasscode === expectedPasscode) {
+      return res.json({ success: true, verified: true });
+    }
+    return res.status(403).json({ success: false, verified: false, error: 'Incorrect event passcode.' });
+  } catch (err) {
+    console.error('Verify event passcode error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -1021,6 +1087,280 @@ function runPythonFaceDetector(filePath) {
 
   return tryPythonCommand(0);
 }
+
+function runPythonSingleFaceDescriptor(filePath, box) {
+  const defaultCmds = [
+    'python',
+    'python3',
+    'py',
+    'C:\\Users\\SOURAV SENAPATI\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'
+  ];
+  const cmds = workingPythonCmd
+    ? [workingPythonCmd, ...defaultCmds.filter(c => c !== workingPythonCmd)]
+    : defaultCmds;
+
+  const tryPythonCommand = (index) => {
+    if (index >= cmds.length) {
+      return Promise.resolve({ success: false, error: 'Python interpreter not available on host system.' });
+    }
+
+    return new Promise((resolve) => {
+      const cmd = cmds[index];
+      const scriptPath = path.join(__dirname, 'compute_single_descriptor.py');
+      const boxJson = JSON.stringify(box);
+
+      execFile(cmd, [scriptPath, filePath, boxJson], { timeout: 35000 }, (error, stdout, stderr) => {
+        if (error) {
+          console.warn(`[Python Single Face Descriptor] Error executing '${cmd}':`, error.message);
+          return tryPythonCommand(index + 1).then(resolve);
+        }
+        try {
+          const result = JSON.parse(stdout);
+          if (result && result.success !== undefined) {
+            return resolve(result);
+          }
+          tryPythonCommand(index + 1).then(resolve);
+        } catch (parseErr) {
+          console.warn(`[Python Single Face Descriptor] Failed to parse stdout from '${cmd}':`, stdout);
+          tryPythonCommand(index + 1).then(resolve);
+        }
+      });
+    });
+  };
+
+  return tryPythonCommand(0);
+}
+
+async function getPhotoFileBuffer(photo, req) {
+  let fileId = photo.fileId;
+  if (!fileId && photo.filename && photo.filename.startsWith('drive:')) {
+    fileId = photo.filename.slice('drive:'.length);
+  }
+
+  if (fileId) {
+    const settings = await readSettings();
+    if (!settings.googleRefreshToken) {
+      throw new Error('Google Drive is not connected');
+    }
+    const oauth2Client = await createGoogleOAuthClient(req);
+    oauth2Client.setCredentials({ refresh_token: settings.googleRefreshToken });
+    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+    const response = await drive.files.get(
+      { fileId, alt: 'media' },
+      { responseType: 'arraybuffer' }
+    );
+    return Buffer.from(response.data);
+  }
+
+  if (photo.filename && photo.filename.startsWith('firebase:')) {
+    const storagePath = photo.filename.slice('firebase:'.length);
+    const { stream } = await getFirebaseFileStream(storagePath);
+    const chunks = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  }
+
+  const filename = photo.filename || (photo.storageUrl ? path.basename(photo.storageUrl) : null);
+  if (filename) {
+    const localPath = path.join(__dirname, 'public', 'uploads', filename);
+    if (fs.existsSync(localPath)) {
+      return fs.readFileSync(localPath);
+    }
+  }
+
+  throw new Error(`Could not find image source file for photo ${photo.id}`);
+}
+
+app.post('/api/admin/photos/:id/manual-face', async (req, res) => {
+  try {
+    const isAdmin = await isValidAdminSession(req);
+    if (!isAdmin) {
+      return res.status(401).json({ success: false, error: 'Unauthorized access.' });
+    }
+
+    const { id } = req.params;
+    const { faceIndex, box, clientDescriptor } = req.body;
+
+    if (!box || typeof box.x !== 'number' || typeof box.y !== 'number' || typeof box.width !== 'number' || typeof box.height !== 'number') {
+      return res.status(400).json({ success: false, error: 'Valid box object with x, y, width, height is required.' });
+    }
+
+    const targetBox = {
+      x: Math.round(box.x),
+      y: Math.round(box.y),
+      width: Math.round(box.width),
+      height: Math.round(box.height)
+    };
+
+    const photo = await getPhotoById(id);
+    if (!photo) {
+      return res.status(404).json({ success: false, error: 'Photo not found.' });
+    }
+
+    let descriptor = null;
+    let tempPath = null;
+
+    try {
+      const buffer = await getPhotoFileBuffer(photo, req);
+      const ext = (photo.mimeType && photo.mimeType.includes('png')) ? '.png' : '.jpg';
+      const tempDir = path.join(__dirname, 'scratch');
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      tempPath = path.join(tempDir, `manual_face_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${ext}`);
+      fs.writeFileSync(tempPath, buffer);
+
+      const pyResult = await runPythonSingleFaceDescriptor(tempPath, targetBox);
+      if (pyResult && pyResult.success && Array.isArray(pyResult.descriptor) && pyResult.descriptor.length === 128) {
+        descriptor = pyResult.descriptor;
+      } else {
+        console.warn(`[Manual Face] Python descriptor extraction failed/unavailable:`, pyResult ? pyResult.error : 'no result');
+      }
+    } catch (fileErr) {
+      console.warn(`[Manual Face] Could not retrieve original image file:`, fileErr.message);
+    } finally {
+      if (tempPath && fs.existsSync(tempPath)) {
+        try { fs.unlinkSync(tempPath); } catch (e) {}
+      }
+    }
+
+    // Fallback to clientDescriptor if python failed/unavailable
+    if (!descriptor && Array.isArray(clientDescriptor) && clientDescriptor.length === 128) {
+      descriptor = clientDescriptor;
+      console.log(`[Manual Face] Using client-provided face descriptor fallback for photo ${id}.`);
+    }
+
+    if (!descriptor) {
+      return res.status(422).json({
+        success: false,
+        error: 'Could not generate dlib face descriptor for the selected box. Ensure Python face_recognition is installed and the box covers a clear face.'
+      });
+    }
+
+    // Update photo descriptors array
+    let currentDescriptors = Array.isArray(photo.descriptors) ? [...photo.descriptors] : [];
+    
+    currentDescriptors = currentDescriptors.map(item => {
+      if (Array.isArray(item)) {
+        return { descriptor: item, box: { x: 0, y: 0, width: 0, height: 0 } };
+      }
+      return item;
+    });
+
+    const targetIdx = parseInt(faceIndex, 10);
+    const newFaceItem = {
+      box: targetBox,
+      descriptor
+    };
+
+    if (targetIdx >= 0 && targetIdx < currentDescriptors.length) {
+      currentDescriptors[targetIdx] = newFaceItem;
+      console.log(`[Manual Face] Corrected face #${targetIdx} on photo ${id}`);
+    } else {
+      currentDescriptors.push(newFaceItem);
+      console.log(`[Manual Face] Added new face descriptor on photo ${id} (total: ${currentDescriptors.length})`);
+    }
+
+    const faceDetected = currentDescriptors.length > 0;
+    const faceDetectionStatus = faceDetected ? 'Face Detected' : 'No Face Detected';
+
+    const patch = {
+      descriptors: currentDescriptors,
+      faceDetected,
+      faceDetectionStatus,
+      reviewed: true,
+      reviewedAt: new Date().toISOString()
+    };
+
+    const updatedPhoto = await updatePhoto(id, patch);
+    res.json({
+      success: true,
+      photo: updatedPhoto || { ...photo, ...patch },
+      faceIndex: targetIdx >= 0 && targetIdx < currentDescriptors.length ? targetIdx : currentDescriptors.length - 1
+    });
+
+  } catch (err) {
+    console.error('[Manual Face Endpoint Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admin/photos/:id/delete-face', async (req, res) => {
+  try {
+    const isAdmin = await isValidAdminSession(req);
+    if (!isAdmin) {
+      return res.status(401).json({ success: false, error: 'Unauthorized access.' });
+    }
+
+    const { id } = req.params;
+    const { faceIndex } = req.body;
+
+    const photo = await getPhotoById(id);
+    if (!photo) {
+      return res.status(404).json({ success: false, error: 'Photo not found.' });
+    }
+
+    let currentDescriptors = Array.isArray(photo.descriptors) ? [...photo.descriptors] : [];
+    const targetIdx = parseInt(faceIndex, 10);
+
+    if (isNaN(targetIdx) || targetIdx < 0 || targetIdx >= currentDescriptors.length) {
+      return res.status(400).json({ success: false, error: 'Invalid face index specified for deletion.' });
+    }
+
+    currentDescriptors.splice(targetIdx, 1);
+
+    const faceDetected = currentDescriptors.length > 0;
+    const faceDetectionStatus = faceDetected ? 'Face Detected' : 'No Face Detected';
+
+    const patch = {
+      descriptors: currentDescriptors,
+      faceDetected,
+      faceDetectionStatus,
+      reviewed: true,
+      reviewedAt: new Date().toISOString()
+    };
+
+    const updatedPhoto = await updatePhoto(id, patch);
+    console.log(`[Manual Face] Removed face #${targetIdx} from photo ${id} (remaining: ${currentDescriptors.length})`);
+    res.json({
+      success: true,
+      photo: updatedPhoto || { ...photo, ...patch }
+    });
+  } catch (err) {
+    console.error('[Delete Face Endpoint Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admin/photos/:id/toggle-review', async (req, res) => {
+  try {
+    const isAdmin = await isValidAdminSession(req);
+    if (!isAdmin) {
+      return res.status(401).json({ success: false, error: 'Unauthorized access.' });
+    }
+    const { id } = req.params;
+    const photo = await getPhotoById(id);
+    if (!photo) {
+      return res.status(404).json({ success: false, error: 'Photo not found.' });
+    }
+    const newReviewed = !photo.reviewed;
+    const patch = {
+      reviewed: newReviewed,
+      reviewedAt: newReviewed ? new Date().toISOString() : null
+    };
+    const updatedPhoto = await updatePhoto(id, patch);
+    console.log(`[Photo Review] Toggled photo ${id} reviewed status to ${newReviewed}`);
+    res.json({
+      success: true,
+      photo: updatedPhoto || { ...photo, ...patch }
+    });
+  } catch (err) {
+    console.error('[Toggle Review Endpoint Error]:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 function verifyPythonSetup() {
   const cmds = [
@@ -1289,6 +1629,19 @@ app.post('/api/search', async (req, res) => {
 
     const eventId = req.body.eventId;
     if (eventId && eventId !== 'all') {
+      const events = await readEventsDb();
+      const targetEvent = events.find(e => e.id === eventId);
+      if (targetEvent && targetEvent.passcode && targetEvent.passcode.trim() && !isAdmin) {
+        const providedPasscode = (req.headers['x-event-passcode'] || req.body.eventPasscode || '').trim();
+        if (providedPasscode !== targetEvent.passcode.trim()) {
+          return res.status(403).json({
+            success: false,
+            passcodeRequired: true,
+            eventId,
+            error: 'Passcode required to search within this private event.'
+          });
+        }
+      }
       approvedPhotos = approvedPhotos.filter(photo => photo.eventId === eventId);
     }
 
@@ -1524,11 +1877,13 @@ app.get('/api/admin/settings', checkAdminAuth, async (req, res) => {
 });
 
 app.post('/api/admin/settings', checkAdminAuth, async (req, res) => {
-  const { publicGalleryEnabled, publicGalleryHeading, newPassword, logoWidth, photoRetentionHours, googleClientId, googleClientSecret, galleryMessage } = req.body;
+  const { publicGalleryEnabled, publicGalleryHeading, defaultPublicEventId, allowPublicFaceAdjustment, newPassword, logoWidth, photoRetentionHours, googleClientId, googleClientSecret, galleryMessage } = req.body;
   const settings = await readSettings();
 
   if (publicGalleryEnabled !== undefined) settings.publicGalleryEnabled = !!publicGalleryEnabled;
   if (publicGalleryHeading !== undefined) settings.publicGalleryHeading = publicGalleryHeading.toString().trim() || 'Gallery Catalog';
+  if (defaultPublicEventId !== undefined) settings.defaultPublicEventId = defaultPublicEventId.toString().trim() || 'all';
+  if (allowPublicFaceAdjustment !== undefined) settings.allowPublicFaceAdjustment = !!allowPublicFaceAdjustment;
   if (newPassword && newPassword.trim() !== '') settings.adminPassword = newPassword.trim();
   if (logoWidth !== undefined) settings.logoWidth = parseInt(logoWidth, 10) || 245;
   if (photoRetentionHours !== undefined) settings.photoRetentionHours = parseFloat(photoRetentionHours);

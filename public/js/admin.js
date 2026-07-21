@@ -168,6 +168,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupBulkActions();
   setupDirectUpload();
   setupEventManagement();
+  setupManualFaceEvents();
 
   // Preload face-api models for face detection on upload
   loadFaceApiModels().catch(err => console.warn('Failed to preload face-api models:', err));
@@ -301,7 +302,10 @@ async function loadDashboardData() {
     // 1. Fetch Global Settings
     const settingsRes = await adminFetch('/api/admin/settings');
     if (settingsRes.success) {
+      window.defaultPublicEventId = settingsRes.settings.defaultPublicEventId || 'all';
       document.getElementById('toggle-public-gallery-switch').checked = settingsRes.settings.publicGalleryEnabled;
+      const faceAdjustSwitch = document.getElementById('toggle-public-face-adjustment-switch');
+      if (faceAdjustSwitch) faceAdjustSwitch.checked = settingsRes.settings.allowPublicFaceAdjustment !== false;
 
       // Update logo width slider
       const logoWidth = settingsRes.settings.logoWidth || 245;
@@ -413,6 +417,8 @@ function updateStatsAndRender() {
   const noFaceCount = photos.filter(p => !p.descriptors || p.descriptors.length === 0).length;
   const publicUploadCount = photos.filter(p => p.uploadedBy !== 'admin').length;
   const adminUploadCount = photos.filter(p => p.uploadedBy === 'admin').length;
+  const reviewDoneCount = photos.filter(p => p.reviewed === true).length;
+  const reviewPendingCount = photos.filter(p => p.reviewed !== true).length;
 
   // Render stats counters
   document.getElementById('stat-total').innerText = totalCount;
@@ -421,6 +427,12 @@ function updateStatsAndRender() {
   document.getElementById('stat-rejected').innerText = rejectedCount;
   const noFaceEl = document.getElementById('stat-no-face');
   if (noFaceEl) noFaceEl.innerText = noFaceCount;
+
+  const reviewDoneEl = document.getElementById('stat-review-done');
+  if (reviewDoneEl) reviewDoneEl.innerText = reviewDoneCount;
+
+  const reviewPendingEl = document.getElementById('stat-review-pending');
+  if (reviewPendingEl) reviewPendingEl.innerText = reviewPendingCount;
 
   // Render Tab Badges
   const badgePending = document.getElementById('badge-pending-count');
@@ -462,6 +474,24 @@ function setupTabFilters() {
     });
   });
 }
+
+window.togglePhotoReview = async function(id) {
+  try {
+    const res = await adminFetch(`/api/admin/photos/${id}/toggle-review`, { method: 'POST' });
+    if (res.success && res.photo) {
+      const idx = window.allPhotos.findIndex(p => p.id === id);
+      if (idx !== -1) {
+        window.allPhotos[idx] = res.photo;
+      }
+      updateStatsAndRender();
+    } else {
+      alert("Error updating review status: " + (res.error || 'Unknown error'));
+    }
+  } catch (err) {
+    console.error("Toggle review error:", err);
+    alert("Failed to update review status: " + err.message);
+  }
+};
 
 // --- Render Table Dynamic Rows ---
 function renderModerationTable() {
@@ -583,6 +613,9 @@ function renderModerationTable() {
     }
 
     actionsHtml += `
+        <button class="btn btn-secondary btn-sm" onclick="openManualFaceModalById('${photo.id}')" title="Manual Face Correction" style="background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #c4b5fd;">
+          <i class="fa-solid fa-crop-simple"></i> Fix Faces
+        </button>
         <button class="btn btn-danger btn-sm" onclick="deletePhotoPermanently('${photo.id}')" title="Delete Permanent">
           <i class="fa-solid fa-trash-can"></i>
         </button>
@@ -598,12 +631,18 @@ function renderModerationTable() {
       ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;"><i class="fa-solid fa-user-shield"></i> Admin</span>`
       : `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;"><i class="fa-solid fa-user"></i> Public</span>`;
 
+    const isReviewed = photo.reviewed === true;
+    const reviewBadge = isReviewed
+      ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;" title="Face review verified"><i class="fa-solid fa-square-check"></i> Review Done</span>`
+      : `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;" title="Face review pending"><i class="fa-solid fa-clock-rotate-left"></i> Review Pending</span>`;
+
     tr.innerHTML = `
         <td>
           <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="thumb-img" loading="lazy" alt="Thumbnail" onclick="openAdminLightbox('${photo.id}')">
         </td>
-      <td style="font-weight: 500; font-size:13px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${photo.originalName}">
+      <td style="font-weight: 500; font-size:13px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${photo.originalName}">
         ${photo.originalName}
+        <div style="margin-top:2px;">${reviewBadge}</div>
       </td>
       <td>${eventBadge}</td>
       <td>${uploaderBadge}</td>
@@ -750,6 +789,26 @@ function setupSettingsEvents() {
       publicSwitch.checked = !enabled; // revert
     }
   });
+
+  const faceAdjustSwitch = document.getElementById('toggle-public-face-adjustment-switch');
+  if (faceAdjustSwitch) {
+    faceAdjustSwitch.addEventListener('change', async () => {
+      const enabled = faceAdjustSwitch.checked;
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ allowPublicFaceAdjustment: enabled })
+        });
+        if (!res.success) {
+          alert("Failed to save face adjustment setting: " + res.error);
+          faceAdjustSwitch.checked = !enabled;
+        }
+      } catch (err) {
+        faceAdjustSwitch.checked = !enabled;
+      }
+    });
+  }
 
   const passwordForm = document.getElementById('change-password-form');
   passwordForm.addEventListener('submit', async (e) => {
@@ -1040,6 +1099,34 @@ function setupSettingsEvents() {
         }
       } catch (err) {
         console.error('Gallery message save error:', err);
+      }
+    });
+  }
+
+  // Default Public Event Save
+  const saveDefaultEventBtn = document.getElementById('save-default-event-btn');
+  if (saveDefaultEventBtn) {
+    saveDefaultEventBtn.addEventListener('click', async () => {
+      const defaultSelect = document.getElementById('default-public-event-select');
+      const savedIndicator = document.getElementById('default-event-saved-indicator');
+      const defaultPublicEventId = defaultSelect ? defaultSelect.value : 'all';
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ defaultPublicEventId })
+        });
+        if (res.success) {
+          window.defaultPublicEventId = defaultPublicEventId;
+          if (savedIndicator) {
+            savedIndicator.style.display = 'block';
+            setTimeout(() => { savedIndicator.style.display = 'none'; }, 3000);
+          }
+        } else {
+          alert('Failed to save default event: ' + res.error);
+        }
+      } catch (err) {
+        console.error('Save default event error:', err);
       }
     });
   }
@@ -1583,17 +1670,25 @@ function renderAdminEventsList() {
   }
 
   container.innerHTML = events.map(evt => `
-    <div style="display:flex; justify-space-between; align-items:center; background:rgba(255,255,255,0.02); border:1px solid var(--panel-border); padding:8px 12px; border-radius:var(--border-radius-sm);">
+    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); border:1px solid var(--panel-border); padding:8px 12px; border-radius:var(--border-radius-sm);">
       <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:8px;">
         <strong style="font-size:13px; color:#fff;">${evt.title || evt.name}</strong>
+        ${(evt.passcode || evt.hasPasscode) ? `<span class="badge" style="background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); padding:1px 6px; font-size:10px; margin-left:6px;"><i class="fa-solid fa-lock"></i> ${evt.passcode ? 'Passcode: ' + evt.passcode : 'Passcode Protected'}</span>` : ''}
+        ${evt.allowDownload === false ? `<span class="badge" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-ban"></i> No Downloads</span>` : ''}
+        ${evt.disableRightClick ? `<span class="badge" style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-shield"></i> Protected</span>` : ''}
         <div style="font-size:11px; color:var(--text-secondary);">
           <i class="fa-regular fa-calendar" style="margin-right:3px;"></i>${evt.date || 'No Date'} &bull; 
           <i class="fa-solid fa-image" style="margin-right:3px;"></i>${evt.photoCount || 0} photo(s)
         </div>
       </div>
-      <button onclick="deleteEventItem('${evt.id}')" class="btn btn-secondary btn-sm" style="padding:4px 8px; color:var(--danger); border-color:rgba(239,68,68,0.2);" title="Delete Event">
-        <i class="fa-solid fa-trash-can"></i>
-      </button>
+      <div style="display:flex; gap:4px;">
+        <button onclick="openEditEventModal('${evt.id}')" class="btn btn-secondary btn-sm" style="padding:4px 8px;" title="Edit Event Settings">
+          <i class="fa-solid fa-pen"></i>
+        </button>
+        <button onclick="deleteEventItem('${evt.id}')" class="btn btn-secondary btn-sm" style="padding:4px 8px; color:var(--danger); border-color:rgba(239,68,68,0.2);" title="Delete Event">
+          <i class="fa-solid fa-trash-can"></i>
+        </button>
+      </div>
     </div>
   `).join('');
 }
@@ -1602,7 +1697,7 @@ function populateAdminEventDropdowns() {
   const globalPicker = document.getElementById('admin-global-event-picker');
   const uploadSelect = document.getElementById('admin-upload-event-select');
 
-  const eventOptions = (window.allEvents || []).map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}</option>`).join('');
+  const eventOptions = (window.allEvents || []).map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
 
   if (globalPicker) {
     globalPicker.innerHTML = `<option value="all">📁 All Events (Full Photo Catalog)</option>` + eventOptions;
@@ -1618,7 +1713,7 @@ function populateAdminEventDropdowns() {
 
   if (uploadSelect) {
     uploadSelect.innerHTML = `<option value="">-- General / Default Event --</option>` +
-      (window.allEvents || []).map(evt => `<option value="${evt.id}">${evt.title || evt.name}</option>`).join('');
+      (window.allEvents || []).map(evt => `<option value="${evt.id}">${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
     uploadSelect.value = window.adminActiveEventId === 'all' ? '' : window.adminActiveEventId;
 
     if (!uploadSelect.dataset.listenerAttached) {
@@ -1627,6 +1722,13 @@ function populateAdminEventDropdowns() {
         setAdminActiveEvent(e.target.value || 'all');
       });
     }
+  }
+
+  const defaultSelect = document.getElementById('default-public-event-select');
+  if (defaultSelect) {
+    defaultSelect.innerHTML = `<option value="all">🎉 All Events (Full Photo Catalog)</option>` +
+      (window.allEvents || []).map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
+    defaultSelect.value = window.defaultPublicEventId || 'all';
   }
 }
 
@@ -1652,6 +1754,10 @@ function setupEventManagement() {
     const dateInput = document.getElementById('event-date-input');
     const descInput = document.getElementById('event-desc-input');
     const statusInput = document.getElementById('event-status-input');
+    const passcodeInput = document.getElementById('event-passcode-input');
+    const allowDownloadCheck = document.getElementById('event-allow-download-check');
+    const disableRightClickCheck = document.getElementById('event-disable-rightclick-check');
+    const announcementInput = document.getElementById('event-announcement-input');
 
     const title = titleInput.value.trim();
     if (!title) return;
@@ -1665,7 +1771,11 @@ function setupEventManagement() {
           name: title,
           date: dateInput ? dateInput.value : '',
           description: descInput ? descInput.value.trim() : '',
-          status: statusInput ? statusInput.value : 'active'
+          status: statusInput ? statusInput.value : 'active',
+          passcode: passcodeInput ? passcodeInput.value.trim() : '',
+          allowDownload: allowDownloadCheck ? allowDownloadCheck.checked : true,
+          disableRightClick: disableRightClickCheck ? disableRightClickCheck.checked : false,
+          announcementMessage: announcementInput ? announcementInput.value.trim() : ''
         })
       });
 
@@ -1673,6 +1783,10 @@ function setupEventManagement() {
         titleInput.value = '';
         if (dateInput) dateInput.value = '';
         if (descInput) descInput.value = '';
+        if (passcodeInput) passcodeInput.value = '';
+        if (allowDownloadCheck) allowDownloadCheck.checked = true;
+        if (disableRightClickCheck) disableRightClickCheck.checked = false;
+        if (announcementInput) announcementInput.value = '';
         await fetchEventsAndRender();
         alert(`Event '${title}' created successfully!`);
       } else {
@@ -1683,7 +1797,68 @@ function setupEventManagement() {
       alert("Failed to create event: " + err.message);
     }
   });
+
+  const editForm = document.getElementById('edit-event-form');
+  if (editForm) {
+    editForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('edit-event-id').value;
+      const title = document.getElementById('edit-event-title').value.trim();
+      if (!title || !id) return;
+
+      try {
+        const res = await adminFetch(`/api/events/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            name: title,
+            date: document.getElementById('edit-event-date').value,
+            status: document.getElementById('edit-event-status').value,
+            description: document.getElementById('edit-event-desc').value.trim(),
+            passcode: document.getElementById('edit-event-passcode').value.trim(),
+            allowDownload: document.getElementById('edit-event-allow-download').checked,
+            disableRightClick: document.getElementById('edit-event-disable-rightclick').checked,
+            announcementMessage: document.getElementById('edit-event-announcement').value.trim()
+          })
+        });
+
+        if (res.success) {
+          closeEditEventModal();
+          await fetchEventsAndRender();
+        } else {
+          alert('Failed to update event: ' + res.error);
+        }
+      } catch (err) {
+        console.error('Update event error:', err);
+        alert('Failed to update event: ' + err.message);
+      }
+    });
+  }
 }
+
+window.openEditEventModal = function(id) {
+  const evt = (window.allEvents || []).find(e => e.id === id);
+  if (!evt) return;
+
+  document.getElementById('edit-event-id').value = evt.id;
+  document.getElementById('edit-event-title').value = evt.title || evt.name || '';
+  document.getElementById('edit-event-date').value = evt.date || '';
+  document.getElementById('edit-event-status').value = evt.status || 'active';
+  document.getElementById('edit-event-desc').value = evt.description || '';
+  document.getElementById('edit-event-passcode').value = evt.passcode || '';
+  document.getElementById('edit-event-allow-download').checked = evt.allowDownload !== false;
+  document.getElementById('edit-event-disable-rightclick').checked = !!evt.disableRightClick;
+  document.getElementById('edit-event-announcement').value = evt.announcementMessage || '';
+
+  const modal = document.getElementById('edit-event-modal');
+  if (modal) modal.style.display = 'flex';
+};
+
+window.closeEditEventModal = function() {
+  const modal = document.getElementById('edit-event-modal');
+  if (modal) modal.style.display = 'none';
+};
 
 window.deleteEventItem = async function(id) {
   const evt = window.allEvents.find(e => e.id === id);
@@ -1702,4 +1877,714 @@ window.deleteEventItem = async function(id) {
     }
   }
 };
+
+// ==========================================================================
+// MANUAL FACE CORRECTION ENGINE
+// ==========================================================================
+
+let currentManualFacePhoto = null;
+let manualFaceBoxes = [];
+let manualFaceSelectedIndex = -1;
+
+let mfIsDragging = false;
+let mfDragMode = null; // 'move', 'resize-nw', 'resize-ne', 'resize-sw', 'resize-se', 'resize-n', 'resize-e', 'resize-s', 'resize-w', 'draw'
+let mfDragStart = { x: 0, y: 0, nx: 0, ny: 0 };
+let mfInitialBox = null;
+
+function setupManualFaceEvents() {
+  const modal = document.getElementById('manual-face-modal');
+  const closeBtn = document.getElementById('manual-face-close-btn');
+  const updateBtn = document.getElementById('manual-face-update-btn');
+  const deleteBtn = document.getElementById('manual-face-delete-btn');
+  const lightboxBtn = document.getElementById('lightbox-manual-face-btn');
+
+  const canvas = document.getElementById('manual-face-canvas');
+  const img = document.getElementById('manual-face-img');
+
+  const inputX = document.getElementById('mf-input-x');
+  const inputY = document.getElementById('mf-input-y');
+  const inputW = document.getElementById('mf-input-w');
+  const inputH = document.getElementById('mf-input-h');
+
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeManualFaceModal);
+  }
+
+  if (lightboxBtn) {
+    lightboxBtn.addEventListener('click', () => {
+      if (window.selectedPhotoForLightbox) {
+        closeLightbox();
+        openManualFaceModal(window.selectedPhotoForLightbox);
+      }
+    });
+  }
+
+  if (updateBtn) {
+    updateBtn.addEventListener('click', handleManualFaceUpdate);
+  }
+
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', handleManualFaceDelete);
+  }
+
+  [inputX, inputY, inputW, inputH].forEach(input => {
+    if (input) {
+      input.addEventListener('change', updateBoxFromInputs);
+      input.addEventListener('input', updateBoxFromInputs);
+    }
+  });
+
+  if (canvas) {
+    canvas.addEventListener('mousedown', handleMfMouseDown);
+    canvas.addEventListener('mousemove', handleMfMouseMove);
+    canvas.addEventListener('mouseup', handleMfMouseUp);
+    canvas.addEventListener('mouseleave', handleMfMouseUp);
+
+    canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const mouseEvent = new MouseEvent('mousedown', {
+          clientX: touch.clientX,
+          clientY: touch.clientY
+        });
+        canvas.dispatchEvent(mouseEvent);
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const mouseEvent = new MouseEvent('mousemove', {
+          clientX: touch.clientX,
+          clientY: touch.clientY
+        });
+        canvas.dispatchEvent(mouseEvent);
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', () => {
+      const mouseEvent = new MouseEvent('mouseup', {});
+      canvas.dispatchEvent(mouseEvent);
+    });
+  }
+
+  window.addEventListener('resize', () => {
+    if (modal && modal.style.display !== 'none' && currentManualFacePhoto) {
+      syncCanvasDimensions();
+      drawManualFaceCanvas();
+    }
+  });
+
+  const rotateRightBtn = document.getElementById('mf-rotate-right-btn');
+  const rotateLeftBtn = document.getElementById('mf-rotate-left-btn');
+  const rotateResetBtn = document.getElementById('mf-rotate-reset-btn');
+
+  if (rotateRightBtn) {
+    rotateRightBtn.addEventListener('click', () => {
+      manualFaceRotation = (manualFaceRotation + 90) % 360;
+      applyMfRotation();
+    });
+  }
+  if (rotateLeftBtn) {
+    rotateLeftBtn.addEventListener('click', () => {
+      manualFaceRotation = (manualFaceRotation - 90 + 360) % 360;
+      applyMfRotation();
+    });
+  }
+  if (rotateResetBtn) {
+    rotateResetBtn.addEventListener('click', () => {
+      manualFaceRotation = 0;
+      applyMfRotation();
+    });
+  }
+}
+
+window.openManualFaceModalById = function(photoId) {
+  const photo = window.allPhotos.find(p => p.id === photoId);
+  if (photo) {
+    openManualFaceModal(photo);
+  }
+};
+
+let manualFaceRotation = 0;
+
+function applyMfRotation() {
+  const wrapper = document.getElementById('manual-face-canvas-wrapper');
+  if (wrapper) {
+    wrapper.style.transform = `rotate(${manualFaceRotation}deg)`;
+    wrapper.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+  }
+}
+
+function openManualFaceModal(photo) {
+  currentManualFacePhoto = photo;
+  manualFaceRotation = 0;
+  applyMfRotation();
+
+  // Automatically mark photo as reviewed when Fix Faces is opened
+  if (photo && !photo.reviewed) {
+    photo.reviewed = true;
+    togglePhotoReview(photo.id);
+  }
+  const modal = document.getElementById('manual-face-modal');
+  const img = document.getElementById('manual-face-img');
+  const statusBanner = document.getElementById('manual-face-status-banner');
+
+  if (statusBanner) {
+    statusBanner.style.display = 'none';
+  }
+
+  const rawDescriptors = Array.isArray(photo.descriptors) ? photo.descriptors : [];
+  manualFaceBoxes = rawDescriptors.map(item => {
+    if (item && item.box && typeof item.box.x === 'number') {
+      return { ...item.box };
+    }
+    return { x: 0, y: 0, width: 100, height: 100 };
+  });
+
+  manualFaceSelectedIndex = manualFaceBoxes.length > 0 ? 0 : -1;
+
+  const photoUrl = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
+  img.onload = () => {
+    syncCanvasDimensions();
+    renderManualFacePills();
+    updateInputFields();
+    drawManualFaceCanvas();
+  };
+  img.src = photoUrl;
+
+  modal.style.display = 'flex';
+}
+
+function closeManualFaceModal() {
+  const modal = document.getElementById('manual-face-modal');
+  if (modal) modal.style.display = 'none';
+  currentManualFacePhoto = null;
+  manualFaceBoxes = [];
+  manualFaceSelectedIndex = -1;
+  mfIsDragging = false;
+  mfDragMode = null;
+}
+
+function syncCanvasDimensions() {
+  const img = document.getElementById('manual-face-img');
+  const canvas = document.getElementById('manual-face-canvas');
+  if (!img || !canvas) return;
+
+  const w = img.clientWidth || img.width;
+  const h = img.clientHeight || img.height;
+  canvas.width = w;
+  canvas.height = h;
+}
+
+function getCanvasScale() {
+  const img = document.getElementById('manual-face-img');
+  const canvas = document.getElementById('manual-face-canvas');
+  if (!img || !canvas || !img.naturalWidth || !img.naturalHeight) {
+    return { scaleX: 1, scaleY: 1 };
+  }
+  return {
+    scaleX: canvas.width / img.naturalWidth,
+    scaleY: canvas.height / img.naturalHeight
+  };
+}
+
+function renderManualFacePills() {
+  const listEl = document.getElementById('manual-face-list');
+  const badgeEl = document.getElementById('manual-face-count-badge');
+  if (!listEl) return;
+
+  if (badgeEl) {
+    badgeEl.innerText = `${manualFaceBoxes.length} Face(s) Detected`;
+  }
+
+  listEl.innerHTML = '';
+
+  manualFaceBoxes.forEach((box, idx) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `btn btn-sm ${idx === manualFaceSelectedIndex ? 'btn-primary' : 'btn-secondary'}`;
+    btn.style.fontSize = '11px';
+    btn.style.padding = '4px 10px';
+    btn.style.borderRadius = '12px';
+    btn.innerHTML = `<i class="fa-solid fa-user"></i> Face #${idx + 1}`;
+    btn.addEventListener('click', () => {
+      manualFaceSelectedIndex = idx;
+      renderManualFacePills();
+      updateInputFields();
+      drawManualFaceCanvas();
+    });
+    listEl.appendChild(btn);
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = `btn btn-sm ${manualFaceSelectedIndex === -1 ? 'btn-primary' : 'btn-tertiary'}`;
+  addBtn.style.fontSize = '11px';
+  addBtn.style.padding = '4px 10px';
+  addBtn.style.borderRadius = '12px';
+  addBtn.innerHTML = `<i class="fa-solid fa-plus"></i> Draw New Face`;
+  addBtn.addEventListener('click', () => {
+    manualFaceSelectedIndex = -1;
+    renderManualFacePills();
+    updateInputFields();
+    drawManualFaceCanvas();
+  });
+  listEl.appendChild(addBtn);
+}
+
+function updateInputFields() {
+  const inputX = document.getElementById('mf-input-x');
+  const inputY = document.getElementById('mf-input-y');
+  const inputW = document.getElementById('mf-input-w');
+  const inputH = document.getElementById('mf-input-h');
+
+  if (manualFaceSelectedIndex >= 0 && manualFaceSelectedIndex < manualFaceBoxes.length) {
+    const box = manualFaceBoxes[manualFaceSelectedIndex];
+    if (inputX) inputX.value = Math.round(box.x);
+    if (inputY) inputY.value = Math.round(box.y);
+    if (inputW) inputW.value = Math.round(box.width);
+    if (inputH) inputH.value = Math.round(box.height);
+  } else {
+    if (inputX) inputX.value = 0;
+    if (inputY) inputY.value = 0;
+    if (inputW) inputW.value = 0;
+    if (inputH) inputH.value = 0;
+  }
+}
+
+function updateBoxFromInputs() {
+  if (manualFaceSelectedIndex < 0 || manualFaceSelectedIndex >= manualFaceBoxes.length) return;
+
+  const inputX = document.getElementById('mf-input-x');
+  const inputY = document.getElementById('mf-input-y');
+  const inputW = document.getElementById('mf-input-w');
+  const inputH = document.getElementById('mf-input-h');
+
+  const box = manualFaceBoxes[manualFaceSelectedIndex];
+  if (inputX && !isNaN(parseInt(inputX.value))) box.x = Math.max(0, parseInt(inputX.value));
+  if (inputY && !isNaN(parseInt(inputY.value))) box.y = Math.max(0, parseInt(inputY.value));
+  if (inputW && !isNaN(parseInt(inputW.value))) box.width = Math.max(10, parseInt(inputW.value));
+  if (inputH && !isNaN(parseInt(inputH.value))) box.height = Math.max(10, parseInt(inputH.value));
+
+  drawManualFaceCanvas();
+}
+
+function drawManualFaceCanvas() {
+  const canvas = document.getElementById('manual-face-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const { scaleX, scaleY } = getCanvasScale();
+  const HANDLE_SIZE = 8;
+
+  manualFaceBoxes.forEach((box, idx) => {
+    const bx = box.x * scaleX;
+    const by = box.y * scaleY;
+    const bw = box.width * scaleX;
+    const bh = box.height * scaleY;
+
+    const isSelected = idx === manualFaceSelectedIndex;
+
+    if (isSelected) {
+      ctx.fillStyle = 'rgba(139, 92, 246, 0.25)';
+      ctx.fillRect(bx, by, bw, bh);
+
+      ctx.strokeStyle = '#a78bfa';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([]);
+      ctx.strokeRect(bx, by, bw, bh);
+
+      const labelText = `Face #${idx + 1} (Active)`;
+      ctx.font = 'bold 12px Inter, sans-serif';
+      const textWidth = ctx.measureText(labelText).width;
+
+      ctx.fillStyle = '#8b5cf6';
+      ctx.fillRect(bx, Math.max(0, by - 22), textWidth + 12, 20);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(labelText, bx + 6, Math.max(14, by - 7));
+
+      const handles = getHandleCoordinates(bx, by, bw, bh);
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#8b5cf6';
+      ctx.lineWidth = 2;
+
+      Object.values(handles).forEach(h => {
+        ctx.fillRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+        ctx.strokeRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+      });
+    } else {
+      ctx.strokeStyle = 'rgba(6, 182, 212, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 3]);
+      ctx.strokeRect(bx, by, bw, bh);
+
+      const labelText = `Face #${idx + 1}`;
+      ctx.font = '500 11px Inter, sans-serif';
+      const textWidth = ctx.measureText(labelText).width;
+
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.85)';
+      ctx.fillRect(bx, Math.max(0, by - 20), textWidth + 10, 18);
+
+      ctx.fillStyle = '#000000';
+      ctx.fillText(labelText, bx + 5, Math.max(13, by - 6));
+    }
+  });
+}
+
+function getHandleCoordinates(bx, by, bw, bh) {
+  return {
+    nw: { x: bx, y: by },
+    n:  { x: bx + bw / 2, y: by },
+    ne: { x: bx + bw, y: by },
+    e:  { x: bx + bw, y: by + bh / 2 },
+    se: { x: bx + bw, y: by + bh },
+    s:  { x: bx + bw / 2, y: by + bh },
+    sw: { x: bx, y: by + bh },
+    w:  { x: bx, y: by + bh / 2 }
+  };
+}
+
+function handleMfMouseDown(e) {
+  const canvas = document.getElementById('manual-face-canvas');
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const { scaleX, scaleY } = getCanvasScale();
+  const nx = mx / scaleX;
+  const ny = my / scaleY;
+
+  const HANDLE_SIZE = 12;
+
+  if (manualFaceSelectedIndex >= 0 && manualFaceSelectedIndex < manualFaceBoxes.length) {
+    const box = manualFaceBoxes[manualFaceSelectedIndex];
+    const bx = box.x * scaleX;
+    const by = box.y * scaleY;
+    const bw = box.width * scaleX;
+    const bh = box.height * scaleY;
+
+    const handles = {
+      'resize-nw': { x: bx, y: by },
+      'resize-n':  { x: bx + bw / 2, y: by },
+      'resize-ne': { x: bx + bw, y: by },
+      'resize-e':  { x: bx + bw, y: by + bh / 2 },
+      'resize-se': { x: bx + bw, y: by + bh },
+      'resize-s':  { x: bx + bw / 2, y: by + bh },
+      'resize-sw': { x: bx, y: by + bh },
+      'resize-w':  { x: bx, y: by + bh / 2 }
+    };
+
+    for (const [mode, h] of Object.entries(handles)) {
+      if (Math.abs(mx - h.x) <= HANDLE_SIZE && Math.abs(my - h.y) <= HANDLE_SIZE) {
+        mfIsDragging = true;
+        mfDragMode = mode;
+        mfDragStart = { mx, my, nx, ny };
+        mfInitialBox = { ...box };
+        return;
+      }
+    }
+
+    if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+      mfIsDragging = true;
+      mfDragMode = 'move';
+      mfDragStart = { mx, my, nx, ny };
+      mfInitialBox = { ...box };
+      return;
+    }
+  }
+
+  for (let i = manualFaceBoxes.length - 1; i >= 0; i--) {
+    const box = manualFaceBoxes[i];
+    const bx = box.x * scaleX;
+    const by = box.y * scaleY;
+    const bw = box.width * scaleX;
+    const bh = box.height * scaleY;
+
+    if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+      manualFaceSelectedIndex = i;
+      mfIsDragging = true;
+      mfDragMode = 'move';
+      mfDragStart = { mx, my, nx, ny };
+      mfInitialBox = { ...box };
+      renderManualFacePills();
+      updateInputFields();
+      drawManualFaceCanvas();
+      return;
+    }
+  }
+
+  const img = document.getElementById('manual-face-img');
+  const maxNx = img.naturalWidth || 1000;
+  const maxNy = img.naturalHeight || 1000;
+
+  const newBox = {
+    x: Math.min(maxNx - 10, Math.max(0, Math.round(nx))),
+    y: Math.min(maxNy - 10, Math.max(0, Math.round(ny))),
+    width: 20,
+    height: 20
+  };
+
+  manualFaceBoxes.push(newBox);
+  manualFaceSelectedIndex = manualFaceBoxes.length - 1;
+
+  mfIsDragging = true;
+  mfDragMode = 'draw';
+  mfDragStart = { mx, my, nx: newBox.x, ny: newBox.y };
+  mfInitialBox = { ...newBox };
+
+  renderManualFacePills();
+  updateInputFields();
+  drawManualFaceCanvas();
+}
+
+function handleMfMouseMove(e) {
+  const canvas = document.getElementById('manual-face-canvas');
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const { scaleX, scaleY } = getCanvasScale();
+  const nx = mx / scaleX;
+  const ny = my / scaleY;
+
+  if (!mfIsDragging) {
+    if (manualFaceSelectedIndex >= 0 && manualFaceSelectedIndex < manualFaceBoxes.length) {
+      const box = manualFaceBoxes[manualFaceSelectedIndex];
+      const bx = box.x * scaleX;
+      const by = box.y * scaleY;
+      const bw = box.width * scaleX;
+      const bh = box.height * scaleY;
+
+      if (Math.abs(mx - bx) < 8 && Math.abs(my - by) < 8) canvas.style.cursor = 'nwse-resize';
+      else if (Math.abs(mx - (bx + bw)) < 8 && Math.abs(my - by) < 8) canvas.style.cursor = 'nesw-resize';
+      else if (Math.abs(mx - bx) < 8 && Math.abs(my - (by + bh)) < 8) canvas.style.cursor = 'nesw-resize';
+      else if (Math.abs(mx - (bx + bw)) < 8 && Math.abs(my - (by + bh)) < 8) canvas.style.cursor = 'nwse-resize';
+      else if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) canvas.style.cursor = 'move';
+      else canvas.style.cursor = 'crosshair';
+    } else {
+      canvas.style.cursor = 'crosshair';
+    }
+    return;
+  }
+
+  if (manualFaceSelectedIndex < 0 || manualFaceSelectedIndex >= manualFaceBoxes.length) return;
+
+  const box = manualFaceBoxes[manualFaceSelectedIndex];
+  const img = document.getElementById('manual-face-img');
+  const maxW = img.naturalWidth || 2048;
+  const maxH = img.naturalHeight || 2048;
+
+  const dNx = Math.round(nx - mfDragStart.nx);
+  const dNy = Math.round(ny - mfDragStart.ny);
+
+  if (mfDragMode === 'move') {
+    box.x = Math.max(0, Math.min(maxW - box.width, mfInitialBox.x + dNx));
+    box.y = Math.max(0, Math.min(maxH - box.height, mfInitialBox.y + dNy));
+  } else if (mfDragMode === 'draw') {
+    let currX = mfDragStart.nx;
+    let currY = mfDragStart.ny;
+    let currW = Math.round(nx - currX);
+    let currH = Math.round(ny - currY);
+
+    if (currW < 0) {
+      box.x = Math.max(0, currX + currW);
+      box.width = Math.abs(currW);
+    } else {
+      box.x = currX;
+      box.width = Math.min(maxW - currX, currW);
+    }
+
+    if (currH < 0) {
+      box.y = Math.max(0, currY + currH);
+      box.height = Math.abs(currH);
+    } else {
+      box.y = currY;
+      box.height = Math.min(maxH - currY, currH);
+    }
+  } else if (mfDragMode.startsWith('resize-')) {
+    const mode = mfDragMode.replace('resize-', '');
+
+    let newX = mfInitialBox.x;
+    let newY = mfInitialBox.y;
+    let newW = mfInitialBox.width;
+    let newH = mfInitialBox.height;
+
+    if (mode.includes('w')) {
+      const targetRight = mfInitialBox.x + mfInitialBox.width;
+      newX = Math.max(0, Math.min(targetRight - 15, mfInitialBox.x + dNx));
+      newW = targetRight - newX;
+    }
+    if (mode.includes('e')) {
+      newW = Math.max(15, Math.min(maxW - mfInitialBox.x, mfInitialBox.width + dNx));
+    }
+    if (mode.includes('n')) {
+      const targetBottom = mfInitialBox.y + mfInitialBox.height;
+      newY = Math.max(0, Math.min(targetBottom - 15, mfInitialBox.y + dNy));
+      newH = targetBottom - newY;
+    }
+    if (mode.includes('s')) {
+      newH = Math.max(15, Math.min(maxH - mfInitialBox.y, mfInitialBox.height + dNy));
+    }
+
+    box.x = newX;
+    box.y = newY;
+    box.width = newW;
+    box.height = newH;
+  }
+
+  updateInputFields();
+  drawManualFaceCanvas();
+}
+
+function handleMfMouseUp() {
+  if (!mfIsDragging) return;
+  mfIsDragging = false;
+  mfDragMode = null;
+
+  if (manualFaceSelectedIndex >= 0 && manualFaceSelectedIndex < manualFaceBoxes.length) {
+    const box = manualFaceBoxes[manualFaceSelectedIndex];
+    if (box.width < 15) box.width = 15;
+    if (box.height < 15) box.height = 15;
+  }
+
+  updateInputFields();
+  drawManualFaceCanvas();
+}
+
+async function handleManualFaceUpdate() {
+  if (!currentManualFacePhoto) return;
+
+  if (manualFaceSelectedIndex < 0 || manualFaceSelectedIndex >= manualFaceBoxes.length) {
+    alert("Please select or draw a face bounding box first.");
+    return;
+  }
+
+  const box = manualFaceBoxes[manualFaceSelectedIndex];
+  if (box.width < 15 || box.height < 15) {
+    alert("Please make sure the bounding box width and height are at least 15 pixels.");
+    return;
+  }
+
+  const statusBanner = document.getElementById('manual-face-status-banner');
+  if (statusBanner) {
+    statusBanner.className = 'badge badge-pending';
+    statusBanner.style.display = 'block';
+    statusBanner.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Generating dlib face descriptor...`;
+  }
+
+  let clientDescriptor = null;
+
+  try {
+    const result = await adminFetch(`/api/admin/photos/${currentManualFacePhoto.id}/manual-face`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        faceIndex: manualFaceSelectedIndex,
+        box,
+        clientDescriptor
+      })
+    });
+
+    if (result.success && result.photo) {
+      const idx = window.allPhotos.findIndex(p => p.id === result.photo.id);
+      if (idx !== -1) {
+        window.allPhotos[idx] = result.photo;
+      }
+      currentManualFacePhoto = result.photo;
+
+      manualFaceBoxes = result.photo.descriptors.map(item => item.box || { x: 0, y: 0, width: 0, height: 0 });
+      if (result.faceIndex !== undefined && result.faceIndex >= 0) {
+        manualFaceSelectedIndex = result.faceIndex;
+      }
+
+      if (statusBanner) {
+        statusBanner.className = 'badge badge-approved';
+        statusBanner.innerHTML = `<i class="fa-solid fa-circle-check"></i> Face descriptor updated successfully!`;
+      }
+
+      updateStatsAndRender();
+      renderManualFacePills();
+      updateInputFields();
+      drawManualFaceCanvas();
+      updateStatsAndRender();
+    } else {
+      throw new Error(result.error || 'Failed to update face descriptor');
+    }
+  } catch (err) {
+    console.error('Update manual face error:', err);
+    if (statusBanner) {
+      statusBanner.className = 'badge badge-rejected';
+      statusBanner.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i> Error: ${err.message}`;
+    }
+  }
+}
+
+async function handleManualFaceDelete() {
+  if (!currentManualFacePhoto) return;
+
+  if (manualFaceSelectedIndex < 0 || manualFaceSelectedIndex >= manualFaceBoxes.length) {
+    alert("Please select a face bounding box to delete.");
+    return;
+  }
+
+  if (!confirm(`Are you sure you want to delete Face #${manualFaceSelectedIndex + 1}?`)) {
+    return;
+  }
+
+  const statusBanner = document.getElementById('manual-face-status-banner');
+  if (statusBanner) {
+    statusBanner.className = 'badge badge-pending';
+    statusBanner.style.display = 'block';
+    statusBanner.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Removing face descriptor...`;
+  }
+
+  try {
+    const result = await adminFetch(`/api/admin/photos/${currentManualFacePhoto.id}/delete-face`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        faceIndex: manualFaceSelectedIndex
+      })
+    });
+
+    if (result.success && result.photo) {
+      const idx = window.allPhotos.findIndex(p => p.id === result.photo.id);
+      if (idx !== -1) {
+        window.allPhotos[idx] = result.photo;
+      }
+      currentManualFacePhoto = result.photo;
+
+      manualFaceBoxes = result.photo.descriptors.map(item => item.box || { x: 0, y: 0, width: 0, height: 0 });
+      manualFaceSelectedIndex = manualFaceBoxes.length > 0 ? 0 : -1;
+
+      if (statusBanner) {
+        statusBanner.className = 'badge badge-approved';
+        statusBanner.innerHTML = `<i class="fa-solid fa-circle-check"></i> Face deleted successfully!`;
+      }
+
+      renderManualFacePills();
+      updateInputFields();
+      drawManualFaceCanvas();
+      updateStatsAndRender();
+    } else {
+      throw new Error(result.error || 'Failed to delete face');
+    }
+  } catch (err) {
+    console.error('Delete face error:', err);
+    if (statusBanner) {
+      statusBanner.className = 'badge badge-rejected';
+      statusBanner.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i> Error: ${err.message}`;
+    }
+  }
+}
+
 

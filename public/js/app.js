@@ -83,14 +83,42 @@ async function initFaceApi() {
 // Fetch gallery catalog
 async function fetchGallery() {
   try {
-    const response = await fetch('/api/gallery');
+    const headers = {};
+    if (window.selectedEventId && window.selectedEventId !== 'all') {
+      const passcode = getUnlockedPasscode(window.selectedEventId);
+      if (passcode) {
+        headers['x-event-passcode'] = passcode;
+      }
+    }
+
+    const queryStr = (window.selectedEventId && window.selectedEventId !== 'all')
+      ? `?eventId=${encodeURIComponent(window.selectedEventId)}`
+      : '';
+
+    const response = await fetch('/api/gallery' + queryStr, { headers });
     const result = await response.json();
+
     if (result.success) {
+      if (!window.defaultEventApplied && result.defaultPublicEventId) {
+        window.defaultEventApplied = true;
+        const savedPref = localStorage.getItem('public_active_event_id');
+        if (!savedPref && result.defaultPublicEventId !== 'all' && window.selectedEventId !== result.defaultPublicEventId) {
+          window.selectedEventId = result.defaultPublicEventId;
+          fetchGallery();
+          return;
+        }
+      }
+
+      if (result.passcodeRequired) {
+        promptEventPasscode(result.eventId || window.selectedEventId);
+        return;
+      }
+
       window.galleryCatalog = result.photos;
       window.allEvents = result.events || [];
       window.publicGalleryEnabled = result.publicGalleryEnabled !== false;
       window.galleryHeading = result.galleryHeading || 'Gallery Catalog';
-      // reset pagination when gallery refreshes
+      window.allowPublicFaceAdjustment = result.allowPublicFaceAdjustment !== false;
       currentGalleryPage = 0;
       
       const headingEl = document.getElementById('gallery-catalog-heading');
@@ -98,11 +126,9 @@ async function fetchGallery() {
         headingEl.innerText = window.galleryHeading;
       }
       
-      // Render event dropdowns and banner
       populatePublicEventDropdowns();
       updateEventBanner();
       
-      // Apply custom logo width if returned
       if (result.logoWidth) {
         const logoImg = document.querySelector('.logo-area img');
         if (logoImg) {
@@ -110,16 +136,13 @@ async function fetchGallery() {
         }
       }
 
-      // Show/hide gallery announcement banner
       const banner = document.getElementById('gallery-announcement-banner');
       const bannerText = document.getElementById('gallery-announcement-text');
+      window.globalGalleryMessage = (result.galleryMessage || '').trim();
       if (banner && bannerText) {
-        const msg = (result.galleryMessage || '').trim();
-        if (msg) {
-          bannerText.textContent = msg;
+        if (window.globalGalleryMessage && (!window.selectedEventId || window.selectedEventId === 'all')) {
+          bannerText.textContent = window.globalGalleryMessage;
           banner.style.display = 'block';
-        } else {
-          banner.style.display = 'none';
         }
       }
       
@@ -230,7 +253,9 @@ document.addEventListener('DOMContentLoaded', () => {
   setupUploadTabEvents();
   setupSearchTabEvents();
   setupLightboxEvents();
-  // Start automatic gallery refresh so the gallery catalog stays dynamic
+  setupEventPasscodeModal();
+  setupRightClickProtection();
+  setupPublicFaceAdjustModal();
   startGalleryAutoRefresh();
 });
 
@@ -950,6 +975,11 @@ async function handleSearchFileSelected(file) {
         feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face Detected`;
         feedbackDesc.innerText = `Ready to search the gallery using 1 detected face.`;
         searchBtn.classList.remove('disabled');
+
+        const adjustBtn = document.getElementById('adjust-search-face-btn');
+        if (adjustBtn) {
+          adjustBtn.style.display = window.allowPublicFaceAdjustment !== false ? 'inline-block' : 'none';
+        }
         
         // Auto-run search for best user experience
         performSearch();
@@ -967,6 +997,8 @@ function clearSearchFile() {
   document.getElementById('search-preview-container').classList.add('hidden');
   document.getElementById('search-feedback-card').classList.add('hidden');
   document.getElementById('execute-search-btn').classList.add('disabled');
+  const adjustBtn = document.getElementById('adjust-search-face-btn');
+  if (adjustBtn) adjustBtn.style.display = 'none';
   // Revoke any object URL used for preview
   if (window.searchQueryObjectUrl) {
     try { URL.revokeObjectURL(window.searchQueryObjectUrl); } catch (e) {}
@@ -1356,7 +1388,15 @@ function openLightbox(photo) {
   const facesCount = photo.descriptors ? photo.descriptors.length : 0;
   faces.innerText = facesCount > 0 ? `${facesCount} face(s) identified` : 'No Face Detected';
 
+  const activeEvt = (window.allEvents || []).find(e => e.id === (photo.eventId || window.selectedEventId));
+  const allowDownload = !activeEvt || activeEvt.allowDownload !== false;
+
+  const downloadBtn = document.getElementById('lightbox-download-btn');
+  if (downloadBtn) {
+    downloadBtn.style.display = allowDownload ? 'block' : 'none';
+  }
   if (downloadLink) {
+    downloadLink.style.display = allowDownload ? 'block' : 'none';
     downloadLink.href = photoUrl;
     downloadLink.setAttribute('download', photo.originalName);
   }
@@ -1410,6 +1450,12 @@ function openLightbox(photo) {
 async function downloadCurrentLightboxPhoto() {
   const photo = window.currentLightboxPhoto;
   if (!photo) return;
+
+  const activeEvt = (window.allEvents || []).find(e => e.id === (photo.eventId || window.selectedEventId));
+  if (activeEvt && activeEvt.allowDownload === false) {
+    alert("Downloading photos is disabled for this event.");
+    return;
+  }
 
   const imageUrl = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
   const filename = photo.originalName || 'photo.jpg';
@@ -1544,6 +1590,17 @@ function renderPublicEventFilterPills() {
 
 // --- Public Event Logic ---
 window.selectPublicEvent = function(eventId) {
+  if (eventId && eventId !== 'all') {
+    const evt = (window.allEvents || []).find(e => e.id === eventId);
+    if (evt && (evt.hasPasscode || evt.passcode)) {
+      const unlocked = getUnlockedPasscode(eventId);
+      if (!unlocked) {
+        promptEventPasscode(eventId);
+        return;
+      }
+    }
+  }
+
   window.selectedEventId = eventId || 'all';
   try {
     localStorage.setItem('public_active_event_id', window.selectedEventId);
@@ -1554,7 +1611,7 @@ window.selectPublicEvent = function(eventId) {
 
   updateEventBanner();
   currentGalleryPage = 0;
-  updateGalleryUI();
+  fetchGallery();
 };
 
 function updateEventBanner() {
@@ -1562,29 +1619,75 @@ function updateEventBanner() {
   const titleEl = document.getElementById('event-banner-title');
   const descEl = document.getElementById('event-banner-desc');
   const dateEl = document.getElementById('event-banner-date');
-  if (!banner) return;
+  const announcementBanner = document.getElementById('gallery-announcement-banner');
+  const announcementText = document.getElementById('gallery-announcement-text');
 
-  if (!window.selectedEventId || window.selectedEventId === 'all') {
-    banner.style.display = 'none';
+  const activeEvt = (window.allEvents || []).find(e => e.id === window.selectedEventId);
+
+  // Apply right click class to body
+  if (activeEvt && activeEvt.disableRightClick) {
+    document.body.classList.add('protected-event-no-rightclick');
+  } else {
+    document.body.classList.remove('protected-event-no-rightclick');
+  }
+
+  if (!window.selectedEventId || window.selectedEventId === 'all' || !activeEvt) {
+    if (banner) banner.style.display = 'none';
+    if (announcementBanner && announcementText) {
+      const globalMsg = (window.globalGalleryMessage || '').trim();
+      if (globalMsg) {
+        announcementText.textContent = globalMsg;
+        announcementBanner.style.display = 'block';
+      } else {
+        announcementBanner.style.display = 'none';
+      }
+    }
     return;
   }
 
-  const evt = (window.allEvents || []).find(e => e.id === window.selectedEventId);
-  if (!evt) {
-    banner.style.display = 'none';
-    return;
+  if (banner) {
+    banner.style.display = 'block';
+    if (titleEl) titleEl.innerText = activeEvt.title || activeEvt.name;
+    if (descEl) descEl.innerText = activeEvt.description || 'Event Gallery';
+    if (dateEl) dateEl.innerText = activeEvt.date ? `Date: ${activeEvt.date}` : '';
   }
 
-  banner.style.display = 'block';
-  if (titleEl) titleEl.innerText = evt.title || evt.name;
-  if (descEl) descEl.innerText = evt.description || 'Event Gallery';
-  if (dateEl) dateEl.innerText = evt.date ? `Date: ${evt.date}` : '';
+  // Update Announcement Banner per Event
+  if (announcementBanner && announcementText) {
+    const eventMsg = (activeEvt.announcementMessage || window.globalGalleryMessage || '').trim();
+    if (eventMsg) {
+      announcementText.textContent = eventMsg;
+      announcementBanner.style.display = 'block';
+    } else {
+      announcementBanner.style.display = 'none';
+    }
+  }
+}
+
+function setupRightClickProtection() {
+  document.addEventListener('contextmenu', (e) => {
+    const activeEvt = (window.allEvents || []).find(e => e.id === window.selectedEventId);
+    if (activeEvt && activeEvt.disableRightClick) {
+      if (e.target.tagName === 'IMG' || e.target.closest('.photo-card') || e.target.closest('#lightbox-modal')) {
+        e.preventDefault();
+      }
+    }
+  });
+
+  document.addEventListener('dragstart', (e) => {
+    const activeEvt = (window.allEvents || []).find(e => e.id === window.selectedEventId);
+    if (activeEvt && activeEvt.disableRightClick) {
+      if (e.target.tagName === 'IMG') {
+        e.preventDefault();
+      }
+    }
+  });
 }
 
 function populatePublicEventDropdowns() {
   const globalPicker = document.getElementById('global-event-picker');
 
-  const eventOptions = (window.allEvents || []).map(evt => `<option value="${evt.id}">🎉 ${evt.title || evt.name}</option>`).join('');
+  const eventOptions = (window.allEvents || []).map(evt => `<option value="${evt.id}">🎉 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
 
   if (globalPicker) {
     globalPicker.innerHTML = `<option value="all">🎉 All Events (Combined Catalog)</option>` + eventOptions;
@@ -1596,6 +1699,453 @@ function populatePublicEventDropdowns() {
         selectPublicEvent(e.target.value);
       });
     }
+  }
+}
+
+// --- Event Passcode Manager ---
+let unlockedEvents = {};
+try {
+  unlockedEvents = JSON.parse(sessionStorage.getItem('unlocked_events') || '{}');
+} catch (e) {
+  unlockedEvents = {};
+}
+
+function getUnlockedEventPasscode(eventId) {
+  return unlockedEvents[eventId] || '';
+}
+
+function saveUnlockedPasscode(eventId, passcode) {
+  unlockedEvents[eventId] = passcode;
+  try {
+    sessionStorage.setItem('unlocked_events', JSON.stringify(unlockedEvents));
+  } catch (e) {}
+}
+
+let pendingEventIdToUnlock = null;
+
+function setupEventPasscodeModal() {
+  const modal = document.getElementById('event-passcode-modal');
+  const form = document.getElementById('event-passcode-form');
+  const cancelBtn = document.getElementById('event-passcode-cancel-btn');
+  const errorEl = document.getElementById('event-passcode-error');
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      closeEventPasscodeModal();
+      window.selectedEventId = 'all';
+      try { localStorage.setItem('public_active_event_id', 'all'); } catch (e) {}
+      const globalPicker = document.getElementById('global-event-picker');
+      if (globalPicker) globalPicker.value = 'all';
+      fetchGallery();
+    });
+  }
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = document.getElementById('public-event-passcode-input');
+      const passcode = input ? input.value.trim() : '';
+
+      if (!pendingEventIdToUnlock) return;
+      if (errorEl) errorEl.style.display = 'none';
+
+      try {
+        const res = await fetch(`/api/events/${pendingEventIdToUnlock}/verify-passcode`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ passcode })
+        });
+        const result = await res.json();
+        if (result.success && result.verified) {
+          saveUnlockedPasscode(pendingEventIdToUnlock, passcode);
+          const unlockedId = pendingEventIdToUnlock;
+          closeEventPasscodeModal();
+          window.selectedEventId = unlockedId;
+          try { localStorage.setItem('public_active_event_id', unlockedId); } catch (e) {}
+          await fetchGallery();
+        } else {
+          if (errorEl) {
+            errorEl.innerText = result.error || 'Incorrect passcode. Please try again.';
+            errorEl.style.display = 'block';
+          }
+        }
+      } catch (err) {
+        console.error("Passcode verification error:", err);
+        if (errorEl) {
+          errorEl.innerText = 'Network error verifying passcode. Please try again.';
+          errorEl.style.display = 'block';
+        }
+      }
+    });
+  }
+}
+
+function promptEventPasscode(eventId) {
+  const evt = (window.allEvents || []).find(e => e.id === eventId);
+  const modal = document.getElementById('event-passcode-modal');
+  const descEl = document.getElementById('event-passcode-modal-desc');
+  const input = document.getElementById('public-event-passcode-input');
+  const errorEl = document.getElementById('event-passcode-error');
+
+  pendingEventIdToUnlock = eventId;
+  if (input) input.value = '';
+  if (errorEl) errorEl.style.display = 'none';
+
+  if (descEl && evt) {
+    descEl.innerHTML = `Event <strong>"${evt.title || evt.name}"</strong> is protected with a passcode. Please enter the passcode to access photos.`;
+  }
+
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeEventPasscodeModal() {
+  const modal = document.getElementById('event-passcode-modal');
+  if (modal) modal.style.display = 'none';
+  pendingEventIdToUnlock = null;
+}
+
+// --- Public Face Adjustment for Search Engine ---
+let publicAdjustBox = { x: 0, y: 0, width: 100, height: 100 };
+let publicAdjustIsDragging = false;
+let publicAdjustDragMode = null;
+let publicAdjustDragStart = { mx: 0, my: 0, nx: 0, ny: 0 };
+let publicAdjustInitialBox = { x: 0, y: 0, width: 100, height: 100 };
+
+function setupPublicFaceAdjustModal() {
+  const modal = document.getElementById('public-face-adjust-modal');
+  const closeBtn = document.getElementById('public-face-adjust-close-btn');
+  const cancelBtn = document.getElementById('public-face-adjust-cancel-btn');
+  const applyBtn = document.getElementById('public-face-adjust-apply-btn');
+  const adjustTriggerBtn = document.getElementById('adjust-search-face-btn');
+
+  if (closeBtn) closeBtn.addEventListener('click', closePublicFaceAdjustModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closePublicFaceAdjustModal);
+
+  if (adjustTriggerBtn) {
+    adjustTriggerBtn.addEventListener('click', openPublicFaceAdjustModal);
+  }
+
+  if (applyBtn) {
+    applyBtn.addEventListener('click', handlePublicFaceAdjustApply);
+  }
+
+  const canvas = document.getElementById('public-face-adjust-canvas');
+  if (canvas) {
+    canvas.addEventListener('mousedown', handlePublicAdjustMouseDown);
+    canvas.addEventListener('mousemove', handlePublicAdjustMouseMove);
+    canvas.addEventListener('mouseup', handlePublicAdjustMouseUp);
+    canvas.addEventListener('mouseleave', handlePublicAdjustMouseUp);
+
+    canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: touch.clientX, clientY: touch.clientY }));
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: touch.clientX, clientY: touch.clientY }));
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', () => {
+      canvas.dispatchEvent(new MouseEvent('mouseup', {}));
+    });
+  }
+}
+
+function openPublicFaceAdjustModal() {
+  if (!window.searchQueryImage) {
+    alert("Please select or capture a photo first.");
+    return;
+  }
+
+  const modal = document.getElementById('public-face-adjust-modal');
+  const img = document.getElementById('public-face-adjust-img');
+  if (!modal || !img) return;
+
+  const objectUrl = (typeof window.searchQueryImage === 'string') 
+    ? window.searchQueryImage 
+    : URL.createObjectURL(window.searchQueryImage);
+
+  img.onload = () => {
+    syncPublicCanvasDimensions();
+    if (window.searchQueryDescriptors && window.searchQueryDescriptors.length > 0 && window.searchQueryDescriptors[0].box) {
+      const b = window.searchQueryDescriptors[0].box;
+      publicAdjustBox = { x: b.x || b.left || 0, y: b.y || b.top || 0, width: b.width || (b.right - b.left) || 100, height: b.height || (b.bottom - b.top) || 100 };
+    } else {
+      const nw = img.naturalWidth || 400;
+      const nh = img.naturalHeight || 400;
+      publicAdjustBox = { x: Math.round(nw * 0.2), y: Math.round(nh * 0.2), width: Math.round(nw * 0.6), height: Math.round(nh * 0.6) };
+    }
+    drawPublicAdjustCanvas();
+  };
+
+  img.src = objectUrl;
+  modal.style.display = 'flex';
+}
+
+function closePublicFaceAdjustModal() {
+  const modal = document.getElementById('public-face-adjust-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function syncPublicCanvasDimensions() {
+  const img = document.getElementById('public-face-adjust-img');
+  const canvas = document.getElementById('public-face-adjust-canvas');
+  if (!img || !canvas) return;
+  canvas.width = img.clientWidth || img.width;
+  canvas.height = img.clientHeight || img.height;
+}
+
+function getPublicCanvasScale() {
+  const img = document.getElementById('public-face-adjust-img');
+  const canvas = document.getElementById('public-face-adjust-canvas');
+  if (!img || !canvas || !img.naturalWidth || !img.naturalHeight) {
+    return { scaleX: 1, scaleY: 1 };
+  }
+  return { scaleX: canvas.width / img.naturalWidth, scaleY: canvas.height / img.naturalHeight };
+}
+
+function drawPublicAdjustCanvas() {
+  const canvas = document.getElementById('public-face-adjust-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const { scaleX, scaleY } = getPublicCanvasScale();
+  const bx = publicAdjustBox.x * scaleX;
+  const by = publicAdjustBox.y * scaleY;
+  const bw = publicAdjustBox.width * scaleX;
+  const bh = publicAdjustBox.height * scaleY;
+  const HANDLE_SIZE = 10;
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.fillRect(0, 0, canvas.width, by);
+  ctx.fillRect(0, by, bx, bh);
+  ctx.fillRect(bx + bw, by, canvas.width - (bx + bw), bh);
+  ctx.fillRect(0, by + bh, canvas.width, canvas.height - (by + bh));
+
+  ctx.fillStyle = 'rgba(139, 92, 246, 0.2)';
+  ctx.fillRect(bx, by, bw, bh);
+
+  ctx.strokeStyle = '#a78bfa';
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([]);
+  ctx.strokeRect(bx, by, bw, bh);
+
+  const labelText = 'Your Face Area';
+  ctx.font = '600 12px Inter, sans-serif';
+  const textWidth = ctx.measureText(labelText).width;
+  ctx.fillStyle = '#8b5cf6';
+  ctx.fillRect(bx, Math.max(0, by - 22), textWidth + 12, 20);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(labelText, bx + 6, Math.max(14, by - 7));
+
+  const handles = {
+    nw: { x: bx, y: by },
+    ne: { x: bx + bw, y: by },
+    se: { x: bx + bw, y: by + bh },
+    sw: { x: bx, y: by + bh }
+  };
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#8b5cf6';
+  ctx.lineWidth = 2;
+
+  Object.values(handles).forEach(h => {
+    ctx.fillRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+    ctx.strokeRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+  });
+}
+
+function handlePublicAdjustMouseDown(e) {
+  const canvas = document.getElementById('public-face-adjust-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const { scaleX, scaleY } = getPublicCanvasScale();
+  const nx = mx / scaleX;
+  const ny = my / scaleY;
+
+  const bx = publicAdjustBox.x * scaleX;
+  const by = publicAdjustBox.y * scaleY;
+  const bw = publicAdjustBox.width * scaleX;
+  const bh = publicAdjustBox.height * scaleY;
+  const HANDLE_SIZE = 14;
+
+  const handles = {
+    'resize-nw': { x: bx, y: by },
+    'resize-ne': { x: bx + bw, y: by },
+    'resize-se': { x: bx + bw, y: by + bh },
+    'resize-sw': { x: bx, y: by + bh }
+  };
+
+  for (const [mode, h] of Object.entries(handles)) {
+    if (Math.abs(mx - h.x) <= HANDLE_SIZE && Math.abs(my - h.y) <= HANDLE_SIZE) {
+      publicAdjustIsDragging = true;
+      publicAdjustDragMode = mode;
+      publicAdjustDragStart = { mx, my, nx, ny };
+      publicAdjustInitialBox = { ...publicAdjustBox };
+      return;
+    }
+  }
+
+  if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+    publicAdjustIsDragging = true;
+    publicAdjustDragMode = 'move';
+    publicAdjustDragStart = { mx, my, nx, ny };
+    publicAdjustInitialBox = { ...publicAdjustBox };
+    return;
+  }
+
+  publicAdjustIsDragging = true;
+  publicAdjustDragMode = 'draw';
+  publicAdjustDragStart = { mx, my, nx, ny };
+  publicAdjustBox = { x: Math.round(nx), y: Math.round(ny), width: 10, height: 10 };
+  publicAdjustInitialBox = { ...publicAdjustBox };
+  drawPublicAdjustCanvas();
+}
+
+function handlePublicAdjustMouseMove(e) {
+  if (!publicAdjustIsDragging) return;
+  const canvas = document.getElementById('public-face-adjust-canvas');
+  const img = document.getElementById('public-face-adjust-img');
+  if (!canvas || !img) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const { scaleX, scaleY } = getPublicCanvasScale();
+  const nx = mx / scaleX;
+  const ny = my / scaleY;
+
+  const maxW = img.naturalWidth || 1000;
+  const maxH = img.naturalHeight || 1000;
+  const dNx = nx - publicAdjustDragStart.nx;
+  const dNy = ny - publicAdjustDragStart.ny;
+
+  if (publicAdjustDragMode === 'move') {
+    let newX = Math.round(publicAdjustInitialBox.x + dNx);
+    let newY = Math.round(publicAdjustInitialBox.y + dNy);
+    newX = Math.max(0, Math.min(maxW - publicAdjustInitialBox.width, newX));
+    newY = Math.max(0, Math.min(maxH - publicAdjustInitialBox.height, newY));
+    publicAdjustBox.x = newX;
+    publicAdjustBox.y = newY;
+  } else if (publicAdjustDragMode === 'draw') {
+    const currX = publicAdjustInitialBox.x;
+    const currY = publicAdjustInitialBox.y;
+    let currW = Math.round(nx - currX);
+    let currH = Math.round(ny - currY);
+
+    if (currW < 0) {
+      publicAdjustBox.x = Math.max(0, currX + currW);
+      publicAdjustBox.width = Math.abs(currW);
+    } else {
+      publicAdjustBox.x = currX;
+      publicAdjustBox.width = Math.min(maxW - currX, currW);
+    }
+    if (currH < 0) {
+      publicAdjustBox.y = Math.max(0, currY + currH);
+      publicAdjustBox.height = Math.abs(currH);
+    } else {
+      publicAdjustBox.y = currY;
+      publicAdjustBox.height = Math.min(maxH - currY, currH);
+    }
+  } else if (publicAdjustDragMode && publicAdjustDragMode.startsWith('resize-')) {
+    const mode = publicAdjustDragMode.replace('resize-', '');
+    let newX = publicAdjustInitialBox.x;
+    let newY = publicAdjustInitialBox.y;
+    let newW = publicAdjustInitialBox.width;
+    let newH = publicAdjustInitialBox.height;
+
+    if (mode.includes('w')) {
+      const targetRight = publicAdjustInitialBox.x + publicAdjustInitialBox.width;
+      newX = Math.max(0, Math.min(targetRight - 15, publicAdjustInitialBox.x + dNx));
+      newW = targetRight - newX;
+    } else if (mode.includes('e')) {
+      newW = Math.max(15, Math.min(maxW - publicAdjustInitialBox.x, publicAdjustInitialBox.width + dNx));
+    }
+    if (mode.includes('n')) {
+      const targetBottom = publicAdjustInitialBox.y + publicAdjustInitialBox.height;
+      newY = Math.max(0, Math.min(targetBottom - 15, publicAdjustInitialBox.y + dNy));
+      newH = targetBottom - newY;
+    } else if (mode.includes('s')) {
+      newH = Math.max(15, Math.min(maxH - publicAdjustInitialBox.y, publicAdjustInitialBox.height + dNy));
+    }
+    publicAdjustBox.x = newX;
+    publicAdjustBox.y = newY;
+    publicAdjustBox.width = newW;
+    publicAdjustBox.height = newH;
+  }
+  drawPublicAdjustCanvas();
+}
+
+function handlePublicAdjustMouseUp() {
+  if (!publicAdjustIsDragging) return;
+  publicAdjustIsDragging = false;
+  publicAdjustDragMode = null;
+  if (publicAdjustBox.width < 15) publicAdjustBox.width = 15;
+  if (publicAdjustBox.height < 15) publicAdjustBox.height = 15;
+  drawPublicAdjustCanvas();
+}
+
+async function handlePublicFaceAdjustApply() {
+  const img = document.getElementById('public-face-adjust-img');
+  const feedbackTitle = document.getElementById('feedback-title');
+  const feedbackDesc = document.getElementById('feedback-desc');
+  const searchBtn = document.getElementById('execute-search-btn');
+
+  if (!img || !window.searchQueryImage) return;
+  closePublicFaceAdjustModal();
+
+  if (feedbackTitle) feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing Adjusted Face...`;
+  if (feedbackDesc) feedbackDesc.innerText = 'Calculating face descriptor from your custom box...';
+
+  try {
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = publicAdjustBox.width;
+    tempCanvas.height = publicAdjustBox.height;
+    const ctx = tempCanvas.getContext('2d');
+    ctx.drawImage(
+      img,
+      publicAdjustBox.x, publicAdjustBox.y, publicAdjustBox.width, publicAdjustBox.height,
+      0, 0, publicAdjustBox.width, publicAdjustBox.height
+    );
+
+    const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/jpeg', 0.95));
+    const croppedFile = new File([blob], 'adjusted_face.jpg', { type: 'image/jpeg' });
+
+    let descriptors = [];
+    try {
+      descriptors = await computeFaceDescriptorsWithTimeout(croppedFile, 15000);
+    } catch (e) {
+      console.warn("Client descriptor on cropped face failed, trying server...", e);
+    }
+
+    if (!descriptors || descriptors.length === 0) {
+      descriptors = await detectFacesOnServer(croppedFile);
+    }
+
+    if (descriptors && descriptors.length > 0) {
+      window.searchQueryDescriptors = descriptors;
+      window.searchQueryDescriptor = descriptors[0].descriptor;
+      if (feedbackTitle) feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Custom Face Box Ready`;
+      if (feedbackDesc) feedbackDesc.innerText = `Searching gallery with your custom adjusted face region...`;
+      if (searchBtn) searchBtn.classList.remove('disabled');
+      performSearch();
+    } else {
+      if (feedbackTitle) feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Low Face Details`;
+      if (feedbackDesc) feedbackDesc.innerText = 'Could not extract features from the selected region. Please try adjusting the box to include the full face.';
+    }
+  } catch (err) {
+    console.error("Public face adjust apply error:", err);
+    alert("Error processing adjusted face: " + err.message);
   }
 }
 

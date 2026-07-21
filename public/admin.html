@@ -431,6 +431,14 @@
                 <span class="stat-label" style="color: var(--text-muted);"><i class="fa-solid fa-face-frown" style="margin-right:4px;"></i>No Face Detected</span>
                 <div class="stat-val" id="stat-no-face" style="color: #a78bfa; font-size: 22px;">0</div>
               </div>
+              <div class="stat-card" style="background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.2);">
+                <span class="stat-label" style="color: #fbbf24;"><i class="fa-solid fa-clock-rotate-left" style="margin-right:4px;"></i>Review Pending</span>
+                <div class="stat-val" id="stat-review-pending" style="color: #fbbf24; font-size: 20px;">0</div>
+              </div>
+              <div class="stat-card" style="background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.2);">
+                <span class="stat-label" style="color: #34d399;"><i class="fa-solid fa-square-check" style="margin-right:4px;"></i>Review Done</span>
+                <div class="stat-val" id="stat-review-done" style="color: #34d399; font-size: 20px;">0</div>
+              </div>
             </div>
           </div>
 
@@ -463,6 +471,24 @@
               <div class="form-group" style="margin-bottom: 10px;">
                 <label class="form-label" for="event-desc-input">Description (Optional)</label>
                 <input type="text" id="event-desc-input" class="form-input" placeholder="Location, occasion, notes..." style="font-size:12px;">
+              </div>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label class="form-label" for="event-passcode-input"><i class="fa-solid fa-key" style="color:var(--primary); margin-right:4px;"></i>Event Passcode (Optional)</label>
+                <input type="password" id="event-passcode-input" class="form-input" placeholder="e.g. 1234 (Leave empty for public access)" style="font-size:12px;">
+              </div>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
+                <div style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:4px; border:1px solid var(--panel-border);">
+                  <input type="checkbox" id="event-allow-download-check" checked style="accent-color:var(--primary); cursor:pointer;">
+                  <label for="event-allow-download-check" style="font-size:11px; cursor:pointer; color:#fff;"><i class="fa-solid fa-download"></i> Allow Download</label>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:4px; border:1px solid var(--panel-border);">
+                  <input type="checkbox" id="event-disable-rightclick-check" style="accent-color:var(--danger); cursor:pointer;">
+                  <label for="event-disable-rightclick-check" style="font-size:11px; cursor:pointer; color:#fff;"><i class="fa-solid fa-ban"></i> Block Right-Click</label>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label class="form-label" for="event-announcement-input"><i class="fa-solid fa-bullhorn" style="color:var(--primary); margin-right:4px;"></i>Event Announcement Banner (Optional)</label>
+                <input type="text" id="event-announcement-input" class="form-input" placeholder="e.g. Welcome to our wedding! Upload photos here..." style="font-size:12px;">
               </div>
               <button type="submit" class="btn btn-primary btn-block btn-sm">
                 <i class="fa-solid fa-calendar-plus"></i> Create New Event
@@ -646,11 +672,45 @@
               </label>
             </div>
 
+            <!-- Public Face Adjustment Toggle -->
+            <div class="switch-container" style="margin-top: 12px;">
+              <div>
+                <span class="switch-label"><i class="fa-solid fa-crop-simple" style="color:var(--primary); margin-right:4px;"></i>Public Face Adjustment for Search</span>
+                <p style="font-size:11px; color: var(--text-muted); margin-top:2px;">Allow visitors to fine-tune/adjust face bounding boxes on their captured selfie for better photo matching</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="toggle-public-face-adjustment-switch" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
             <!-- Public Gallery Heading -->
             <div class="form-group" style="margin-top: 16px;">
               <label class="form-label" for="gallery-heading-input">Public Gallery Heading</label>
               <input type="text" id="gallery-heading-input" class="form-input" placeholder="Gallery Catalog" style="font-size:12px;" />
               <p style="font-size:11px; color: var(--text-muted); margin-top:6px;">Set the main gallery title shown on the public page.</p>
+            </div>
+
+            <!-- Default Public Event Selection (Glassmorphic Highlight Card) -->
+            <div class="default-event-card">
+              <div class="card-header-badge">
+                <i class="fa-solid fa-star"></i> Default Landing View
+              </div>
+              <label class="form-label" for="default-public-event-select" style="font-size:13px; font-weight:600; color:#fff; display:block; margin-bottom:6px;">
+                Default Public Gallery Event
+              </label>
+              <select id="default-public-event-select" class="default-event-select-input">
+                <option value="all">🎉 All Events (Full Photo Catalog)</option>
+              </select>
+              <p style="font-size:11px; color: var(--text-secondary); margin-top:8px; line-height:1.4;">
+                Visitors opening the gallery page will land on this event by default.
+              </p>
+              <button type="button" id="save-default-event-btn" class="default-event-save-btn">
+                <i class="fa-solid fa-floppy-disk"></i> Save Default Event
+              </button>
+              <div id="default-event-saved-indicator" style="display:none; margin-top:8px; font-size:12px; color:#34d399; font-weight:600; text-align:center;">
+                <i class="fa-solid fa-circle-check"></i> Default event saved successfully!
+              </div>
             </div>
 
             <!-- Adjust Logo Section -->
@@ -842,6 +902,9 @@
           <a id="lightbox-download-link" href="" download class="btn btn-primary btn-block text-center">
             <i class="fa-solid fa-download"></i> Download Image
           </a>
+          <button id="lightbox-manual-face-btn" class="btn btn-secondary btn-block" style="background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #c4b5fd;">
+            <i class="fa-solid fa-crop-simple"></i> Manual Face Correction
+          </button>
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
             <button id="lightbox-approve-btn" class="btn btn-success btn-block" style="padding: 10px 0;">
               <i class="fa-solid fa-check"></i> Approve
@@ -858,9 +921,156 @@
     </div>
   </div>
 
+  <!-- MANUAL FACE CORRECTION MODAL -->
+  <div id="manual-face-modal" class="lightbox-modal" style="display:none; z-index: 10005;">
+    <span class="lightbox-close" id="manual-face-close-btn">&times;</span>
+    <div class="lightbox-content-wrapper" style="max-width: 1200px; width: 95vw; height: 90vh;">
+      <div class="manual-face-editor-area" style="flex: 1; display: flex; flex-direction: column; background: #090d16; border-radius: var(--border-radius-md); overflow: hidden; position: relative;">
+        <!-- Toolbar header -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--panel-border);">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <i class="fa-solid fa-crop-simple" style="color: var(--primary); font-size: 18px;"></i>
+            <div>
+              <h3 style="font-size: 15px; font-weight: 700; margin: 0; color: #fff;">Manual Face Correction Editor</h3>
+              <span style="font-size: 11px; color: var(--text-muted);">Click & drag to draw a new box, or drag corners/edges of an existing box to move or resize</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <div style="display:flex; gap:4px; align-items:center; background:rgba(255,255,255,0.05); padding:3px 6px; border-radius:6px; border:1px solid var(--panel-border);">
+              <span style="font-size:11px; color:var(--text-secondary); margin-right:4px;"><i class="fa-solid fa-rotate"></i> Rotate:</span>
+              <button type="button" id="mf-rotate-right-btn" class="btn btn-secondary btn-sm" style="padding:3px 8px; font-size:11px;" title="Rotate 90° Clockwise"><i class="fa-solid fa-rotate-right"></i> +90°</button>
+              <button type="button" id="mf-rotate-left-btn" class="btn btn-secondary btn-sm" style="padding:3px 8px; font-size:11px;" title="Rotate 90° Counter-Clockwise"><i class="fa-solid fa-rotate-left"></i> -90°</button>
+              <button type="button" id="mf-rotate-reset-btn" class="btn btn-secondary btn-sm" style="padding:3px 8px; font-size:11px;" title="Reset Rotation"><i class="fa-solid fa-arrow-rotate-left"></i> Reset</button>
+            </div>
+            <span id="manual-face-count-badge" class="badge badge-approved" style="font-size: 11px; padding: 4px 10px;">0 Faces Detected</span>
+          </div>
+        </div>
+
+        <!-- Interactive Canvas Stage -->
+        <div id="manual-face-canvas-stage" style="flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 20px; user-select: none; cursor: crosshair;">
+          <div id="manual-face-canvas-wrapper" style="position: relative; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border-radius: 6px; overflow: hidden;">
+            <img id="manual-face-img" src="" alt="Target Image" style="display: block; max-width: 100%; max-height: 70vh; object-fit: contain; pointer-events: none;" />
+            <canvas id="manual-face-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair;"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls Sidebar -->
+      <div class="lightbox-sidebar" style="width: 320px; display: flex; flex-direction: column; justify-content: space-between; padding: 20px;">
+        <div>
+          <h3 style="font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+            <i class="fa-solid fa-sliders" style="color: var(--primary);"></i> Face Selection & Controls
+          </h3>
+
+          <div style="margin-bottom: 16px;">
+            <label class="form-label" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Select Face to Edit</label>
+            <div id="manual-face-list" style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 140px; overflow-y: auto; padding: 4px; background: rgba(255,255,255,0.02); border-radius: var(--border-radius-sm); border: 1px solid var(--panel-border);">
+              <!-- Face pills generated dynamically -->
+            </div>
+          </div>
+
+          <div id="manual-face-box-controls" style="background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: var(--border-radius-sm); padding: 12px; margin-bottom: 16px;">
+            <span style="font-size: 12px; font-weight: 600; color: #fff; display: block; margin-bottom: 8px;">Selected Box Bounding Coordinates (px)</span>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div>
+                <label class="form-label" style="font-size: 10px;">X (Left)</label>
+                <input type="number" id="mf-input-x" class="form-input" style="font-size: 12px; padding: 4px 8px;" />
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 10px;">Y (Top)</label>
+                <input type="number" id="mf-input-y" class="form-input" style="font-size: 12px; padding: 4px 8px;" />
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 10px;">Width</label>
+                <input type="number" id="mf-input-w" class="form-input" style="font-size: 12px; padding: 4px 8px;" />
+              </div>
+              <div>
+                <label class="form-label" style="font-size: 10px;">Height</label>
+                <input type="number" id="mf-input-h" class="form-input" style="font-size: 12px; padding: 4px 8px;" />
+              </div>
+            </div>
+          </div>
+
+          <div id="manual-face-status-banner" style="display: none; padding: 10px 12px; border-radius: var(--border-radius-sm); font-size: 12px; margin-bottom: 16px;"></div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button id="manual-face-update-btn" class="btn btn-primary btn-block" style="padding: 12px;">
+            <i class="fa-solid fa-check"></i> Update Face
+          </button>
+          <button id="manual-face-delete-btn" class="btn btn-secondary btn-block" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2); color: #f87171;">
+            <i class="fa-solid fa-trash-can"></i> Delete Selected Face
+          </button>
+        </div>
+      </div>
+    </div>
+  <!-- EDIT EVENT MODAL -->
+  <div id="edit-event-modal" class="auth-overlay" style="display:none; z-index: 10006;">
+    <div class="auth-card" style="max-width: 460px; text-align: left;">
+      <div style="display:flex; justify-space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--panel-border); padding-bottom:10px;">
+        <h2 style="font-family: var(--font-display); font-size:16px; font-weight:700; color:#fff; margin:0;">
+          <i class="fa-solid fa-pen-to-square" style="color:var(--primary); margin-right:6px;"></i>Edit Event Settings
+        </h2>
+        <button type="button" onclick="closeEditEventModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:16px;">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <form id="edit-event-form">
+        <input type="hidden" id="edit-event-id">
+        <div class="form-group" style="margin-bottom: 10px;">
+          <label class="form-label">Event Name *</label>
+          <input type="text" id="edit-event-title" class="form-input" required style="font-size:12px;">
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:10px;">
+          <div>
+            <label class="form-label">Event Date</label>
+            <input type="date" id="edit-event-date" class="form-input" style="font-size:12px; padding: 6px 10px;">
+          </div>
+          <div>
+            <label class="form-label">Status</label>
+            <select id="edit-event-status" class="form-input" style="font-size:12px; padding: 6px 10px;">
+              <option value="active">Active</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 10px;">
+          <label class="form-label">Description</label>
+          <input type="text" id="edit-event-desc" class="form-input" style="font-size:12px;">
+        </div>
+        <div class="form-group" style="margin-bottom: 10px;">
+          <label class="form-label"><i class="fa-solid fa-key" style="color:var(--primary); margin-right:4px;"></i>Event Passcode (Optional)</label>
+          <input type="password" id="edit-event-passcode" class="form-input" placeholder="Leave blank for public access" style="font-size:12px;">
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:10px;">
+          <div style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:4px; border:1px solid var(--panel-border);">
+            <input type="checkbox" id="edit-event-allow-download" style="accent-color:var(--primary); cursor:pointer;">
+            <label for="edit-event-allow-download" style="font-size:11px; cursor:pointer; color:#fff;"><i class="fa-solid fa-download"></i> Allow Download</label>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:4px; border:1px solid var(--panel-border);">
+            <input type="checkbox" id="edit-event-disable-rightclick" style="accent-color:var(--danger); cursor:pointer;">
+            <label for="edit-event-disable-rightclick" style="font-size:11px; cursor:pointer; color:#fff;"><i class="fa-solid fa-ban"></i> Block Right-Click</label>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="form-label"><i class="fa-solid fa-bullhorn" style="color:var(--primary); margin-right:4px;"></i>Event Announcement Banner</label>
+          <input type="text" id="edit-event-announcement" class="form-input" placeholder="Custom message for this event banner..." style="font-size:12px;">
+        </div>
+
+        <div style="display:flex; gap:8px;">
+          <button type="button" onclick="closeEditEventModal()" class="btn btn-secondary btn-block" style="flex:1;">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-block" style="flex:1.5;"><i class="fa-solid fa-floppy-disk"></i> Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script src="js/face-api.js"></script>
   <script src="js/face-detector-utils.js?v=1.0.3"></script>
-  <script src="js/admin.js?v=1.0.3"></script>
+  <script src="js/admin.js?v=1.0.5"></script>
 </body>
 
 </html>
