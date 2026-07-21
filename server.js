@@ -1235,7 +1235,7 @@ app.post('/api/admin/photos/:id/manual-face', async (req, res) => {
     if (!descriptor) {
       return res.status(422).json({
         success: false,
-        error: 'Could not generate dlib face descriptor for the selected box. Ensure Python face_recognition is installed and the box covers a clear face.'
+        error: 'Could not generate face descriptor for the selected box. Ensure the box covers a clear face.'
       });
     }
 

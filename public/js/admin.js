@@ -63,21 +63,7 @@ async function resizeImageIfNeeded(file, maxDim = 2048) {
         canvas.width = newWidth;
         canvas.height = newHeight;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, newWidth, newHeight);
-
-        let finalCanvas = canvas;
-        if (canvas.width > canvas.height) {
-          const vertCanvas = document.createElement('canvas');
-          vertCanvas.width = canvas.height;
-          vertCanvas.height = canvas.width;
-          const vertCtx = vertCanvas.getContext('2d');
-          vertCtx.translate(vertCanvas.width / 2, vertCanvas.height / 2);
-          vertCtx.rotate(90 * Math.PI / 180);
-          vertCtx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
-          finalCanvas = vertCanvas;
-        }
-
-        finalCanvas.toBlob((blob) => {
+        canvas.toBlob((blob) => {
           if (!blob) {
             return resolve(file);
           }
@@ -2023,6 +2009,11 @@ function openManualFaceModal(photo) {
   manualFaceRotation = 0;
   applyMfRotation();
 
+  // Preload face-api models in background for quick manual face extraction
+  if (window.FaceDetectorUtils && typeof window.FaceDetectorUtils.loadFaceApiModels === 'function') {
+    window.FaceDetectorUtils.loadFaceApiModels().catch(e => console.warn('[Manual Face] Model preload warning:', e.message));
+  }
+
   // Automatically mark photo as reviewed when Fix Faces is opened
   if (photo && !photo.reviewed) {
     photo.reviewed = true;
@@ -2478,10 +2469,51 @@ async function handleManualFaceUpdate() {
   if (statusBanner) {
     statusBanner.className = 'badge badge-pending';
     statusBanner.style.display = 'block';
-    statusBanner.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Generating dlib face descriptor...`;
+    statusBanner.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Generating face descriptor...`;
   }
 
   let clientDescriptor = null;
+  const imgEl = document.getElementById('manual-face-img');
+  if (imgEl && window.FaceDetectorUtils && typeof window.FaceDetectorUtils.extractDescriptorForBox === 'function') {
+    let tempObjectUrl = null;
+    try {
+      let targetImg = imgEl;
+      if (currentManualFacePhoto) {
+        const photoUrl = getPhotoUrl(currentManualFacePhoto.filename, currentManualFacePhoto.storageUrl, currentManualFacePhoto.imageUrl);
+        try {
+          const resp = await fetch(photoUrl);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            tempObjectUrl = URL.createObjectURL(blob);
+            const cleanImg = new Image();
+            cleanImg.crossOrigin = 'anonymous';
+            cleanImg.src = tempObjectUrl;
+            await new Promise((res, rej) => {
+              cleanImg.onload = res;
+              cleanImg.onerror = rej;
+            });
+            targetImg = cleanImg;
+          }
+        } catch (fetchErr) {
+          console.warn('[Manual Face] Blob fetch fallback to imgEl:', fetchErr.message);
+        }
+      }
+
+      clientDescriptor = await window.FaceDetectorUtils.extractDescriptorForBox(targetImg, box);
+
+      if (clientDescriptor) {
+        console.log('[Manual Face] Client computed face descriptor successfully.');
+      } else {
+        console.warn('[Manual Face] Client face descriptor extraction returned null.');
+      }
+    } catch (descErr) {
+      console.warn('[Manual Face] Error generating client face descriptor:', descErr ? descErr.message : descErr);
+    } finally {
+      if (tempObjectUrl) {
+        try { URL.revokeObjectURL(tempObjectUrl); } catch (e) {}
+      }
+    }
+  }
 
   try {
     const result = await adminFetch(`/api/admin/photos/${currentManualFacePhoto.id}/manual-face`, {

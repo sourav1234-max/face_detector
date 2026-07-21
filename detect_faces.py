@@ -28,15 +28,6 @@ def main():
 
             orig_width, orig_height = img.size
 
-            # If horizontal (width > height), rotate 90 degrees clockwise to portrait orientation
-            if orig_width > orig_height:
-                img = img.transpose(Image.ROTATE_270)
-                orig_width, orig_height = img.size
-                try:
-                    img.save(img_path, quality=95)
-                except Exception as save_err:
-                    pass
-
             # Resize generously to preserve detail for small or high-resolution portraits.
             max_size = 1600
             resized = False

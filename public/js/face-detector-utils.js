@@ -167,31 +167,18 @@
     ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
     ctx.restore();
 
-    // If image is horizontal (width > height), rotate 90 degrees clockwise to make it vertical (portrait)
-    let finalCanvas = canvas;
-    if (canvas.width > canvas.height) {
-      const vertCanvas = document.createElement('canvas');
-      vertCanvas.width = canvas.height;
-      vertCanvas.height = canvas.width;
-      const vertCtx = vertCanvas.getContext('2d');
-      vertCtx.translate(vertCanvas.width / 2, vertCanvas.height / 2);
-      vertCtx.rotate(90 * Math.PI / 180);
-      vertCtx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
-      finalCanvas = vertCanvas;
-    }
-
     // Export optimized Blob and File
-    const blob = await new Promise((resolve) => finalCanvas.toBlob(resolve, 'image/jpeg', 0.85));
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
     const baseName = fileName.replace(/\.[^/.]+$/, '');
     const resizedFile = new File([blob], `${baseName}.jpg`, {
       type: 'image/jpeg',
       lastModified: Date.now()
     });
 
-    console.log(`[Image Processor] Processed ${fileName}: ${origWidth}x${origHeight} -> ${finalCanvas.width}x${finalCanvas.height} (EXIF Orientation: ${orientation}, Vertical: ${finalCanvas.height >= finalCanvas.width}, Size: ${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`[Image Processor] Processed ${fileName}: ${origWidth}x${origHeight} -> ${canvas.width}x${canvas.height} (EXIF Orientation: ${orientation}, Size: ${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
 
     return {
-      canvas: finalCanvas,
+      canvas,
       blob,
       file: resizedFile,
       originalWidth: origWidth,
@@ -405,6 +392,31 @@
     if (fallbackFiltered.length > 0) {
       console.log(`[Face Detection Pipeline] Pass 2 succeeded. Identified ${fallbackFiltered.length} face(s).`);
       return formatResults(fallbackFiltered);
+    }
+
+    // Pass 3: Sensitive Pass (SSD MobileNet 0.15 & TinyFace 0.15)
+    console.log('[Face Detection Pipeline] Pass 3 (Sensitive): Trying SSD MobileNet (0.15) & TinyFace (416, 0.15)...');
+    let pass3Primary = [];
+    try {
+      pass3Primary = await faceapi
+        .detectAllFaces(inputElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.15 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+    } catch (err) {}
+
+    let pass3Tiny = [];
+    try {
+      pass3Tiny = await faceapi
+        .detectAllFaces(inputElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.15 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+    } catch (err) {}
+
+    let pass3Merged = mergeFaceDetections(pass3Primary, pass3Tiny);
+    let pass3Filtered = filterAndSanitizeDetections(pass3Merged);
+    if (pass3Filtered.length > 0) {
+      console.log(`[Face Detection Pipeline] Pass 3 succeeded. Identified ${pass3Filtered.length} face(s).`);
+      return formatResults(pass3Filtered);
     }
 
     console.log('[Face Detection Pipeline] Detection completed. No faces found.');
@@ -691,12 +703,141 @@
     }
   }
 
+  /**
+   * Extract a 128-dimensional face descriptor for a specific bounding box on an image using face-api.js.
+   * @param {HTMLImageElement|HTMLCanvasElement} inputElement 
+   * @param {{ x: number, y: number, width: number, height: number }} box 
+   * @returns {Promise<Array<number>|null>} Array of 128 numbers or null
+   */
+  async function extractDescriptorForBox(inputElement, box) {
+    if (!inputElement || !box || box.width < 10 || box.height < 10) return null;
+
+    try {
+      await loadFaceApiModels();
+      if (typeof faceapi !== 'undefined' && faceapi.tf) {
+        await faceapi.tf.ready();
+      }
+    } catch (modelErr) {
+      console.warn('[Descriptor Extractor] Failed to initialize browser face-api models:', modelErr.message);
+      return null;
+    }
+
+    const origWidth = inputElement.naturalWidth || inputElement.width;
+    const origHeight = inputElement.naturalHeight || inputElement.height;
+    if (!origWidth || !origHeight) return null;
+
+    // Helper function to try face landmark and descriptor extraction on canvas patch
+    const tryDetectOnCanvas = async (canvas) => {
+      try {
+        let landmarks = await faceapi.detectFaceLandmarks(canvas);
+        if (!landmarks) {
+          landmarks = await faceapi.detectFaceLandmarksTiny(canvas);
+        }
+        if (landmarks) {
+          const desc = await faceapi.computeFaceDescriptor(canvas, landmarks);
+          if (desc) return Array.from(desc);
+        }
+      } catch (e) {
+        console.warn('[Descriptor Extractor] Direct landmark extraction pass:', e.message);
+      }
+
+      try {
+        let det = await faceapi
+          .detectSingleFace(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.05 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+        if (det && det.descriptor) return Array.from(det.descriptor);
+
+        det = await faceapi
+          .detectSingleFace(canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.05 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+        if (det && det.descriptor) return Array.from(det.descriptor);
+      } catch (e) {
+        console.warn('[Descriptor Extractor] Single face pass error:', e.message);
+      }
+      return null;
+    };
+
+    // Pass 1: Try cropped canvas with 25% margin padding around target box
+    const margin = 0.25;
+    const padW = box.width * margin;
+    const padH = box.height * margin;
+    const cropX = Math.max(0, box.x - padW);
+    const cropY = Math.max(0, box.y - padH);
+    const cropW = Math.min(origWidth - cropX, box.width + 2 * padW);
+    const cropH = Math.min(origHeight - cropY, box.height + 2 * padH);
+
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = Math.max(20, Math.round(cropW));
+    cropCanvas.height = Math.max(20, Math.round(cropH));
+    const ctx = cropCanvas.getContext('2d');
+    ctx.drawImage(inputElement, cropX, cropY, cropW, cropH, 0, 0, cropCanvas.width, cropCanvas.height);
+
+    let descriptor = await tryDetectOnCanvas(cropCanvas, 0.1);
+    if (descriptor) return descriptor;
+
+    descriptor = await tryDetectOnCanvas(cropCanvas, 0.03);
+    if (descriptor) return descriptor;
+
+    // Pass 2: Try exact box crop canvas
+    const exactCanvas = document.createElement('canvas');
+    exactCanvas.width = Math.max(20, Math.round(box.width));
+    exactCanvas.height = Math.max(20, Math.round(box.height));
+    const exactCtx = exactCanvas.getContext('2d');
+    exactCtx.drawImage(inputElement, box.x, box.y, box.width, box.height, 0, 0, exactCanvas.width, exactCanvas.height);
+
+    descriptor = await tryDetectOnCanvas(exactCanvas, 0.03);
+    if (descriptor) return descriptor;
+
+    // Pass 3: Fallback - Detect faces on full image and match nearest bounding box center
+    try {
+      let fullDetections = await faceapi
+        .detectAllFaces(inputElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.1 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+
+      if (!fullDetections || fullDetections.length === 0) {
+        fullDetections = await faceapi
+          .detectAllFaces(inputElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.1 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+      }
+
+      if (fullDetections && fullDetections.length > 0) {
+        const targetCenter = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        let bestDet = null;
+        let minDistanceSq = Infinity;
+
+        for (const d of fullDetections) {
+          const db = d.detection.box;
+          const dCenter = { x: db.x + db.width / 2, y: db.y + db.height / 2 };
+          const distSq = Math.pow(targetCenter.x - dCenter.x, 2) + Math.pow(targetCenter.y - dCenter.y, 2);
+          if (distSq < minDistanceSq) {
+            minDistanceSq = distSq;
+            bestDet = d;
+          }
+        }
+
+        const maxDist = Math.max(box.width, box.height) * 2.5;
+        if (bestDet && Math.sqrt(minDistanceSq) <= maxDist && bestDet.descriptor) {
+          return Array.from(bestDet.descriptor);
+        }
+      }
+    } catch (e) {
+      console.warn('[Descriptor Extractor] Full image fallback error:', e.message);
+    }
+
+    return null;
+  }
+
   // Export to global scope
   window.FaceDetectorUtils = {
     getExifOrientation,
     createOrientedCanvas,
     loadFaceApiModels,
     detectFacesMultiScale,
+    extractDescriptorForBox,
     processPhotoForUpload,
     BatchUploadQueue
   };

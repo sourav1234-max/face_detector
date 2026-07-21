@@ -40,11 +40,6 @@ def main():
 
             orig_width, orig_height = img.size
 
-            # If horizontal (width > height), rotate 90 degrees clockwise to portrait orientation (same as detect_faces.py)
-            if orig_width > orig_height:
-                img = img.transpose(Image.ROTATE_270)
-                orig_width, orig_height = img.size
-
             max_size = 1600
             resized = False
             if orig_width > max_size or orig_height > max_size:
