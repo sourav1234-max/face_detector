@@ -1735,3 +1735,727 @@ body.protected-event-no-rightclick #lightbox-img {
 
 
 
+/* ==========================================================================
+   Manual Face Correction Editor Modal — Base Styles (Desktop / Laptop)
+   ========================================================================== */
+
+/* The modal itself is a .lightbox-modal — inherits fixed positioning & overlay */
+#manual-face-modal {
+  padding: 24px;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Two-panel split wrapper replacing generic lightbox-content-wrapper */
+.manual-face-modal-content {
+  display: flex;
+  flex-direction: row;
+  background: var(--bg-secondary);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--border-radius-lg);
+  width: 100%;
+  max-width: 1180px;
+  height: 88vh;
+  max-height: 88vh;
+  overflow: hidden;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.65);
+  animation: fadeIn 0.3s ease;
+}
+
+/* ---- Left panel: image + canvas editor ---- */
+.manual-face-editor-area {
+  flex: 1.6;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: #06090f;
+  border-right: 1px solid var(--panel-border);
+  overflow: hidden;
+}
+
+/* Toolbar strip at top of editor area */
+.manual-face-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.025);
+  border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.mf-toolbar-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mf-toolbar-subtitle {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.3;
+}
+
+.mf-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.mf-rotate-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--border-radius-sm);
+  padding: 4px 10px;
+}
+
+.mf-rotate-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Canvas stage: scrollable, centered */
+#manual-face-canvas-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 20px;
+  position: relative;
+  user-select: none;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.04) 0%, transparent 70%),
+    repeating-linear-gradient(
+      0deg, transparent, transparent 19px,
+      rgba(255,255,255,0.015) 19px, rgba(255,255,255,0.015) 20px
+    ),
+    repeating-linear-gradient(
+      90deg, transparent, transparent 19px,
+      rgba(255,255,255,0.015) 19px, rgba(255,255,255,0.015) 20px
+    );
+}
+
+/* Image + canvas overlay container */
+#manual-face-canvas-wrapper {
+  position: relative;
+  display: inline-block;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.06);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+#manual-face-img {
+  display: block;
+  max-width: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+  pointer-events: none;
+  border-radius: 6px;
+}
+
+#manual-face-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  border-radius: 6px;
+}
+
+/* ---- Right panel: controls sidebar ---- */
+.manual-face-sidebar {
+  flex: 0 0 300px;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 20px;
+  border-left: 1px solid var(--panel-border);
+  background: var(--bg-secondary);
+  overflow-y: auto;
+  gap: 0;
+}
+
+.mf-sidebar-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Face list pills */
+#manual-face-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+/* Coordinate input grid (2x2) */
+.mf-coord-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.mf-coord-grid .form-input {
+  padding: 8px 10px;
+  font-size: 13px;
+  text-align: right;
+  font-family: 'Courier New', monospace;
+  background: rgba(10, 14, 23, 0.7);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: var(--border-radius-sm);
+  color: #c4b5fd;
+  width: 100%;
+  outline: none;
+  transition: var(--transition-smooth);
+}
+
+.mf-coord-grid .form-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.15);
+}
+
+/* Action buttons at bottom of sidebar */
+.mf-action-buttons {
+  margin-top: auto;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* btn-success and btn-warning used in admin moderation */
+.btn-success {
+  background: var(--success-gradient);
+  color: #fff;
+  border: none;
+}
+.btn-success:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.btn-warning {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #000;
+  border: none;
+}
+.btn-warning:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   COMPREHENSIVE RESPONSIVE DESIGN - Mobile First Approach
+   ========================================================================== */
+
+/* ---- Small Mobile (≤ 480px) ---- */
+@media (max-width: 480px) {
+  .app-container {
+    padding: 10px;
+    gap: 12px;
+  }
+
+  /* Header: stack logo and nav vertically */
+  .app-header {
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    text-align: center;
+    padding-bottom: 10px;
+  }
+
+  /* Nav buttons: smaller, full-width-friendly */
+  .app-nav {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px;
+    border-radius: 16px;
+  }
+
+  .nav-btn {
+    padding: 8px 14px;
+    font-size: 12px;
+    border-radius: 14px;
+    white-space: nowrap;
+  }
+
+  /* Event bar */
+  .global-event-bar {
+    padding: 12px 14px;
+    border-radius: var(--border-radius-md);
+  }
+
+  .global-event-wrapper {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .global-event-select {
+    width: 100%;
+    min-width: unset;
+    font-size: 13px;
+    padding: 8px 12px;
+  }
+
+  .event-bar-title {
+    font-size: 13px;
+  }
+  .event-bar-sub {
+    font-size: 11px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Grid becomes single column */
+  .grid-layout {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  /* Panel cards */
+  .panel-card {
+    padding: 16px;
+    border-radius: var(--border-radius-md);
+  }
+
+  .card-header h2 {
+    font-size: 17px;
+  }
+
+  /* Upload zone */
+  .upload-zone, .search-upload-zone {
+    padding: 22px 14px;
+  }
+
+  .zone-icon {
+    width: 56px;
+    height: 56px;
+    font-size: 30px;
+  }
+
+  .main-prompt {
+    font-size: 13px;
+  }
+
+  /* Gallery grid: 2 columns on mobile */
+  .gallery-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .gallery-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+  }
+
+  .gallery-header h2 {
+    font-size: 18px;
+  }
+
+  .gallery-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .gallery-controls .btn {
+    flex: 1;
+    min-width: 0;
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  /* Batch action bar */
+  .gallery-batch-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 10px 12px;
+  }
+
+  .gallery-batch-bar .batch-actions {
+    flex-wrap: wrap;
+    width: 100%;
+    gap: 6px;
+  }
+
+  .gallery-batch-bar .batch-actions .btn {
+    flex: 1;
+    min-width: calc(50% - 3px);
+    justify-content: center;
+    font-size: 12px;
+    padding: 7px 8px;
+  }
+
+  /* Lightbox modal */
+  .lightbox-modal {
+    padding: 8px;
+  }
+
+  .lightbox-close {
+    top: 12px;
+    right: 16px;
+    font-size: 32px;
+  }
+
+  .lightbox-content-wrapper {
+    flex-direction: column;
+    max-height: 95vh;
+    height: 95vh;
+    overflow-y: auto;
+    border-radius: var(--border-radius-md);
+  }
+
+  .lightbox-image-container {
+    flex: none;
+    height: 42vh;
+    min-height: 200px;
+    width: 100%;
+  }
+
+  #lightbox-img {
+    max-height: 100%;
+    max-width: 100%;
+    object-fit: contain;
+  }
+
+  .lightbox-sidebar {
+    flex: 1;
+    padding: 14px;
+    gap: 10px;
+    border-left: none;
+    border-top: 1px solid var(--panel-border);
+  }
+
+  .lightbox-sidebar h3 {
+    font-size: 17px;
+  }
+
+  .lightbox-actions {
+    padding-top: 14px;
+    gap: 8px;
+  }
+
+  /* Search tab toggle buttons */
+  .toggle-btn {
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+
+  /* Camera controls */
+  .camera-controls {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  /* Event passcode modal */
+  #event-passcode-modal .auth-card {
+    padding: 20px 16px;
+    margin: 12px;
+  }
+
+  /* Action buttons */
+  .action-buttons {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ---- Medium Mobile (481px - 640px) ---- */
+@media (min-width: 481px) and (max-width: 640px) {
+  .app-container {
+    padding: 14px;
+    gap: 16px;
+  }
+
+  .app-header {
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .app-nav {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .nav-btn {
+    padding: 9px 16px;
+    font-size: 13px;
+  }
+
+  .global-event-wrapper {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .global-event-select {
+    width: 100%;
+    min-width: unset;
+  }
+
+  .grid-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .gallery-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .gallery-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .lightbox-content-wrapper {
+    flex-direction: column;
+    max-height: 92vh;
+    overflow-y: auto;
+  }
+
+  .lightbox-image-container {
+    flex: none;
+    height: 44vh;
+    min-height: 220px;
+  }
+
+  .lightbox-sidebar {
+    border-left: none;
+    border-top: 1px solid var(--panel-border);
+    padding: 16px;
+  }
+}
+
+/* ---- Tablet (641px - 968px) ---- */
+@media (min-width: 641px) and (max-width: 968px) {
+  .app-header {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  .global-event-wrapper {
+    gap: 12px;
+  }
+
+  .global-event-select {
+    min-width: 200px;
+    max-width: 320px;
+  }
+
+  .grid-layout {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 14px;
+  }
+
+  .lightbox-content-wrapper {
+    max-width: 95vw;
+  }
+}
+
+/* ---- Large desktop (> 1200px) ---- */
+@media (min-width: 1200px) {
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+}
+
+/* ---- General touch-friendly improvements ---- */
+@media (hover: none) and (pointer: coarse) {
+  /* Show overlays on mobile since hover doesn't work */
+  .gallery-item-overlay {
+    opacity: 1;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0) 50%);
+  }
+
+  /* Larger touch targets */
+  .btn {
+    min-height: 42px;
+  }
+
+  .nav-btn {
+    min-height: 40px;
+  }
+
+  .preview-remove-btn {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+/* ==========================================================================
+   Auth Overlay & Card — Event Passcode Modal (Public Page)
+   ========================================================================== */
+
+/* Full-screen dimmed backdrop */
+.auth-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(6, 9, 15, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fadeIn 0.25s ease;
+}
+
+/* Centered modal card */
+.auth-card {
+  background: linear-gradient(160deg, rgba(20, 28, 46, 0.97) 0%, rgba(14, 20, 36, 0.97) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  border-radius: var(--border-radius-lg);
+  padding: 40px 36px;
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 30px 60px rgba(0, 0, 0, 0.55),
+    0 0 40px rgba(139, 92, 246, 0.12);
+  animation: authCardIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle gradient accent line at top of card */
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--primary-gradient);
+  border-radius: 3px 3px 0 0;
+}
+
+@keyframes authCardIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Lock icon area */
+.auth-icon {
+  font-size: 44px;
+  margin-bottom: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1.5px solid rgba(245, 158, 11, 0.3);
+  box-shadow: 0 0 24px rgba(245, 158, 11, 0.15);
+}
+
+/* Form group wrapper */
+.form-group {
+  text-align: left;
+}
+
+/* Password input field */
+.form-input {
+  width: 100%;
+  background: rgba(10, 14, 23, 0.8);
+  border: 1.5px solid rgba(139, 92, 246, 0.3);
+  color: #fff;
+  font-family: var(--font-family);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 12px 16px;
+  border-radius: var(--border-radius-sm);
+  outline: none;
+  transition: var(--transition-smooth);
+  letter-spacing: 0.5px;
+}
+
+.form-input::placeholder {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.form-input:focus {
+  border-color: var(--primary);
+  background: rgba(10, 14, 23, 0.95);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18), 0 0 16px rgba(139, 92, 246, 0.25);
+}
+
+/* ---- Event passcode modal sizing ---- */
+#event-passcode-modal .auth-card {
+  max-width: 420px;
+  width: 100%;
+}
+
+/* ---- Upload event indicator animation ---- */
+#upload-event-indicator {
+  transition: all 0.3s ease;
+}
+
+/* ---- Improved gallery-item sizing on all screens ---- */
+.gallery-item {
+  min-height: 120px;
+}
+
+/* ---- Global event bar responsive improvements ---- */
+.event-bar-sub {
+  max-width: 480px;
+}
+
+/* ---- Compact footer on mobile ---- */
+@media (max-width: 640px) {
+  .app-footer-bar {
+    font-size: 11px;
+    padding-top: 16px;
+  }
+}

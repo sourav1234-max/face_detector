@@ -25,11 +25,11 @@
     <!-- Header -->
     <header class="app-header">
       <div class="logo-area">
-        <img src="photos/logo.png" alt="logo" style="width: 88px; height: 88px; object-fit: contain;">
+        <img src="photos/logo.png" alt="logo" style="width: 72px; height: 72px; object-fit: contain; flex-shrink:0;">
       </div>
 
       <!-- Tab Switchers -->
-      <nav class="app-nav" style="display: flex; align-items: center; gap: 6px;">
+      <nav class="app-nav" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center;">
         <button class="nav-btn active" data-tab="upload-tab">
           <i class="fa-solid fa-cloud-arrow-up"></i> Upload Gallery
         </button>
@@ -72,6 +72,18 @@
               <div class="card-header">
                 <h2>Upload New Photos</h2>
                 <p>Add photos to the searchable gallery</p>
+              </div>
+
+              <!-- Event Upload Target Indicator -->
+              <div id="upload-event-indicator" style="display:none; margin-bottom: 12px; padding: 10px 14px; background: linear-gradient(135deg, rgba(139,92,246,0.12), rgba(59,130,246,0.08)); border: 1px solid rgba(139,92,246,0.3); border-radius: var(--border-radius-sm); animation: fadeIn 0.3s ease;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <i class="fa-solid fa-tag" style="color:#a78bfa; font-size:13px;"></i>
+                  <div>
+                    <span style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Uploading to Event</span>
+                    <div id="upload-event-name" style="font-size:13px; font-weight:700; color:#fff; margin-top:1px;"></div>
+                  </div>
+                  <i class="fa-solid fa-lock" id="upload-event-lock-icon" style="color:#f59e0b; font-size:12px; margin-left:auto; display:none;"></i>
+                </div>
               </div>
 
               <!-- Drag and Drop Zone -->

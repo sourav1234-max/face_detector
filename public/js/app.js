@@ -90,7 +90,7 @@ async function fetchGallery() {
   try {
     const headers = {};
     if (window.selectedEventId && window.selectedEventId !== 'all') {
-      const passcode = getUnlockedPasscode(window.selectedEventId);
+      const passcode = getUnlockedEventPasscode(window.selectedEventId);
       if (passcode) {
         headers['x-event-passcode'] = passcode;
       }
@@ -501,7 +501,16 @@ async function startBatchUpload() {
     return;
   }
 
-  window.publicBatchQueue.eventId = (!window.selectedEventId || window.selectedEventId === 'all') ? '' : window.selectedEventId;
+  const eventId = (!window.selectedEventId || window.selectedEventId === 'all') ? '' : window.selectedEventId;
+  window.publicBatchQueue.eventId = eventId;
+
+  // If selected event is passcode-protected, include passcode in upload
+  if (eventId) {
+    const passcode = getUnlockedEventPasscode(eventId);
+    window.publicBatchQueue.passcode = passcode || '';
+  } else {
+    window.publicBatchQueue.passcode = '';
+  }
 
   if (startUploadBtn) startUploadBtn.classList.add('disabled');
   if (clearQueueBtn) clearQueueBtn.classList.add('disabled');
@@ -1175,9 +1184,18 @@ async function performSearch() {
   const searchEventId = (!window.selectedEventId || window.selectedEventId === 'all') ? 'all' : window.selectedEventId;
 
   try {
+    const searchHeaders = { 'Content-Type': 'application/json' };
+    // Include passcode header if the selected event is passcode-protected
+    if (searchEventId !== 'all') {
+      const passcode = getUnlockedEventPasscode(searchEventId);
+      if (passcode) {
+        searchHeaders['x-event-passcode'] = passcode;
+      }
+    }
+
     const response = await fetch('/api/search', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: searchHeaders,
       body: JSON.stringify({
         descriptors: window.searchQueryDescriptors,
         threshold: threshold,
@@ -1598,7 +1616,7 @@ window.selectPublicEvent = function(eventId) {
   if (eventId && eventId !== 'all') {
     const evt = (window.allEvents || []).find(e => e.id === eventId);
     if (evt && (evt.hasPasscode || evt.passcode)) {
-      const unlocked = getUnlockedPasscode(eventId);
+      const unlocked = getUnlockedEventPasscode(eventId);
       if (!unlocked) {
         promptEventPasscode(eventId);
         return;
@@ -1614,6 +1632,7 @@ window.selectPublicEvent = function(eventId) {
   const globalPicker = document.getElementById('global-event-picker');
   if (globalPicker) globalPicker.value = window.selectedEventId;
 
+  updateUploadEventIndicator();
   updateEventBanner();
   currentGalleryPage = 0;
   fetchGallery();
@@ -1704,6 +1723,37 @@ function populatePublicEventDropdowns() {
         selectPublicEvent(e.target.value);
       });
     }
+  }
+
+  updateUploadEventIndicator();
+}
+
+// Update the upload event indicator to show which event photos will be uploaded to
+function updateUploadEventIndicator() {
+  const indicator = document.getElementById('upload-event-indicator');
+  const nameEl = document.getElementById('upload-event-name');
+  const lockIcon = document.getElementById('upload-event-lock-icon');
+
+  if (!indicator || !nameEl) return;
+
+  if (!window.selectedEventId || window.selectedEventId === 'all') {
+    indicator.style.display = 'none';
+    return;
+  }
+
+  const evt = (window.allEvents || []).find(e => e.id === window.selectedEventId);
+  if (!evt) {
+    indicator.style.display = 'none';
+    return;
+  }
+
+  indicator.style.display = 'block';
+  nameEl.textContent = evt.title || evt.name || 'Selected Event';
+
+  const hasPasscode = evt.hasPasscode || evt.passcode;
+  if (lockIcon) {
+    lockIcon.style.display = hasPasscode ? 'inline-block' : 'none';
+    lockIcon.title = hasPasscode ? 'This event is passcode-protected' : '';
   }
 }
 
