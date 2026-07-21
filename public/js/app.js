@@ -33,8 +33,13 @@ async function computeFaceDescriptors(source) {
   return [];
 }
 
-async function computeFaceDescriptorsWithTimeout(source) {
-  return computeFaceDescriptors(source);
+async function computeFaceDescriptorsWithTimeout(source, timeoutMs = 15000) {
+  return Promise.race([
+    computeFaceDescriptors(source),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Browser face detection timed out')), timeoutMs)
+    )
+  ]);
 }
 
 // Limits to protect browser memory

@@ -1543,5 +1543,195 @@ body.protected-event-no-rightclick #lightbox-img {
   transform: translateY(0);
 }
 
+/* ==========================================================================
+   Admin Mobile Responsive Enhancements & Card Layout
+   ========================================================================== */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 12px;
+    gap: 16px;
+  }
+
+  .admin-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .table-container {
+    overflow-x: visible;
+  }
+
+  .mod-table,
+  .mod-table thead,
+  .mod-table tbody,
+  .mod-table th,
+  .mod-table td,
+  .mod-table tr {
+    display: block;
+  }
+
+  .mod-table thead {
+    display: none;
+  }
+
+  .mod-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .mod-table tr {
+    background: rgba(20, 27, 43, 0.7);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--border-radius-md);
+    padding: 14px;
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 10px 14px;
+    align-items: start;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  }
+
+  .mod-table td {
+    padding: 0;
+    border: none;
+  }
+
+  /* Photo Thumbnail cell */
+  .mod-table td:nth-child(1) {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    width: 100%;
+  }
+
+  .mod-table td:nth-child(1) .thumb-img {
+    width: 90px;
+    height: 90px;
+    border-radius: var(--border-radius-sm);
+    object-fit: cover;
+    border: 1.5px solid rgba(139, 92, 246, 0.3);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Original Filename & review badge */
+  .mod-table td:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* Event Badge */
+  .mod-table td:nth-child(3),
+  .mod-table td:nth-child(4),
+  .mod-table td:nth-child(5),
+  .mod-table td:nth-child(6),
+  .mod-table td:nth-child(7),
+  .mod-table td:nth-child(8) {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-right: 4px;
+    margin-bottom: 2px;
+    font-size: 11px;
+  }
+
+  /* Action buttons row */
+  .mod-table td:nth-child(9) {
+    grid-column: 1 / span 2;
+    grid-row: 4;
+    width: 100%;
+    margin-top: 6px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .mod-table td:nth-child(9) .btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .mod-table td:nth-child(9) .btn-row .btn {
+    flex: 1;
+    min-width: calc(50% - 4px);
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  /* Lightbox Modal Mobile */
+  .lightbox-modal {
+    padding: 10px;
+  }
+
+  .lightbox-content-wrapper {
+    flex-direction: column;
+    max-height: 94vh;
+    height: 94vh;
+    overflow-y: auto;
+    border-radius: var(--border-radius-md);
+  }
+
+  .lightbox-image-container {
+    flex: none;
+    height: 45vh;
+    min-height: 240px;
+    width: 100%;
+    background: #000;
+  }
+
+  #lightbox-img {
+    max-height: 100%;
+    max-width: 100%;
+    object-fit: contain;
+  }
+
+  .lightbox-sidebar {
+    flex: 1;
+    padding: 16px;
+    gap: 12px;
+    border-left: none;
+    border-top: 1px solid var(--panel-border);
+  }
+
+  /* Manual Face Correction Editor Mobile */
+  .manual-face-modal-content {
+    flex-direction: column;
+    height: 95vh;
+    max-height: 95vh;
+    overflow-y: auto;
+  }
+
+  .manual-face-editor-area {
+    flex: none;
+    height: 50vh;
+    min-height: 260px;
+  }
+
+  .manual-face-sidebar {
+    flex: 1;
+    padding: 16px;
+    border-left: none;
+    border-top: 1px solid var(--panel-border);
+  }
+
+  .manual-face-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .mf-toolbar-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+
 
 
