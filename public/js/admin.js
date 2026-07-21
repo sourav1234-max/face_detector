@@ -4,6 +4,8 @@
 
 // Global state variables
 window.allPhotos = [];
+window.allEvents = [];
+window.adminActiveEventId = 'all';
 window.activeFilter = 'all';
 window.selectedPhotoForLightbox = null;
 window.faceApiLoaded = false;
@@ -165,6 +167,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupLightboxEvents();
   setupBulkActions();
   setupDirectUpload();
+  setupEventManagement();
 
   // Preload face-api models for face detection on upload
   loadFaceApiModels().catch(err => console.warn('Failed to preload face-api models:', err));
@@ -379,7 +382,8 @@ async function loadDashboardData() {
       }
     }
 
-    // 2. Fetch Photos
+    // 2. Fetch Events & Photos
+    await fetchEventsAndRender();
     const photosRes = await adminFetch('/api/admin/gallery');
     if (photosRes.success) {
       window.allPhotos = photosRes.photos || [];
@@ -397,7 +401,10 @@ async function loadDashboardData() {
 }
 
 function updateStatsAndRender() {
-  const photos = window.allPhotos;
+  let photos = window.allPhotos;
+  if (window.adminActiveEventId && window.adminActiveEventId !== 'all') {
+    photos = window.allPhotos.filter(p => p.eventId === window.adminActiveEventId);
+  }
 
   const totalCount = photos.length;
   const pendingCount = photos.filter(p => p.status === 'pending').length;
@@ -464,20 +471,26 @@ function renderModerationTable() {
 
   tbody.innerHTML = '';
 
-  // Filter photos
-  let filtered = window.allPhotos;
+  // Filter photos by event first if an event is selected
+  let basePhotos = window.allPhotos;
+  if (window.adminActiveEventId && window.adminActiveEventId !== 'all') {
+    basePhotos = basePhotos.filter(photo => photo.eventId === window.adminActiveEventId);
+  }
+
+  // Filter photos by tab category
+  let filtered = basePhotos;
   if (window.activeFilter === 'public-upload' || window.activeFilter === 'public') {
-    filtered = window.allPhotos.filter(photo => photo.uploadedBy !== 'admin');
+    filtered = basePhotos.filter(photo => photo.uploadedBy !== 'admin');
   } else if (window.activeFilter === 'admin-upload' || window.activeFilter === 'admin') {
-    filtered = window.allPhotos.filter(photo => photo.uploadedBy === 'admin');
+    filtered = basePhotos.filter(photo => photo.uploadedBy === 'admin');
   } else if (window.activeFilter === 'pending') {
-    filtered = window.allPhotos.filter(photo => photo.status === 'pending');
+    filtered = basePhotos.filter(photo => photo.status === 'pending');
   } else if (window.activeFilter === 'approved') {
-    filtered = window.allPhotos.filter(photo => photo.status === 'approved');
+    filtered = basePhotos.filter(photo => photo.status === 'approved');
   } else if (window.activeFilter === 'rejected') {
-    filtered = window.allPhotos.filter(photo => photo.status === 'rejected');
+    filtered = basePhotos.filter(photo => photo.status === 'rejected');
   } else if (window.activeFilter === 'no-face') {
-    filtered = window.allPhotos.filter(photo => !photo.descriptors || photo.descriptors.length === 0);
+    filtered = basePhotos.filter(photo => !photo.descriptors || photo.descriptors.length === 0);
   }
 
   // Update Bulk Delete button text matching the active filter and count
@@ -576,6 +589,10 @@ function renderModerationTable() {
       </div>
     `;
 
+    const evtObj = window.allEvents ? window.allEvents.find(e => e.id === photo.eventId) : null;
+    const evtName = evtObj ? (evtObj.title || evtObj.name) : 'General';
+    const eventBadge = `<span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.3); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;"><i class="fa-solid fa-tag"></i> ${evtName}</span>`;
+
     const isAdminUpload = photo.uploadedBy === 'admin';
     const uploaderBadge = isAdminUpload
       ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;"><i class="fa-solid fa-user-shield"></i> Admin</span>`
@@ -588,6 +605,7 @@ function renderModerationTable() {
       <td style="font-weight: 500; font-size:13px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${photo.originalName}">
         ${photo.originalName}
       </td>
+      <td>${eventBadge}</td>
       <td>${uploaderBadge}</td>
       <td style="color: var(--text-secondary); font-size: 13px;">${dateStr}</td>
       <td style="font-weight: 600;"><i class="fa-solid fa-user-tag" style="color: var(--primary);"></i> ${facesCount}</td>
@@ -1526,8 +1544,162 @@ async function startAdminBatchUpload() {
     window.adminBatchQueue.isPublic = isPublicCheckbox.checked;
   }
 
+  const eventSelect = document.getElementById('admin-upload-event-select');
+  if (eventSelect) {
+    window.adminBatchQueue.eventId = eventSelect.value || '';
+  }
+
   if (startUploadBtn) startUploadBtn.classList.add('disabled');
   if (clearQueueBtn) clearQueueBtn.classList.add('disabled');
 
   window.adminBatchQueue.start();
 }
+
+// --- Event Management ---
+async function fetchEventsAndRender() {
+  try {
+    const res = await adminFetch('/api/events');
+    if (res.success) {
+      window.allEvents = res.events || [];
+      renderAdminEventsList();
+      populateAdminEventDropdowns();
+    }
+  } catch (err) {
+    console.error("Failed to load events:", err);
+  }
+}
+
+function renderAdminEventsList() {
+  const container = document.getElementById('admin-events-list');
+  const countEl = document.getElementById('admin-events-count');
+  if (!container) return;
+
+  const events = window.allEvents;
+  if (countEl) countEl.innerText = events.length;
+
+  if (events.length === 0) {
+    container.innerHTML = `<div style="font-size:12px; color:var(--text-muted); padding:8px 0; text-align:center;">No events created yet. Use the form above to add your first event.</div>`;
+    return;
+  }
+
+  container.innerHTML = events.map(evt => `
+    <div style="display:flex; justify-space-between; align-items:center; background:rgba(255,255,255,0.02); border:1px solid var(--panel-border); padding:8px 12px; border-radius:var(--border-radius-sm);">
+      <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:8px;">
+        <strong style="font-size:13px; color:#fff;">${evt.title || evt.name}</strong>
+        <div style="font-size:11px; color:var(--text-secondary);">
+          <i class="fa-regular fa-calendar" style="margin-right:3px;"></i>${evt.date || 'No Date'} &bull; 
+          <i class="fa-solid fa-image" style="margin-right:3px;"></i>${evt.photoCount || 0} photo(s)
+        </div>
+      </div>
+      <button onclick="deleteEventItem('${evt.id}')" class="btn btn-secondary btn-sm" style="padding:4px 8px; color:var(--danger); border-color:rgba(239,68,68,0.2);" title="Delete Event">
+        <i class="fa-solid fa-trash-can"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+function populateAdminEventDropdowns() {
+  const globalPicker = document.getElementById('admin-global-event-picker');
+  const uploadSelect = document.getElementById('admin-upload-event-select');
+
+  const eventOptions = (window.allEvents || []).map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}</option>`).join('');
+
+  if (globalPicker) {
+    globalPicker.innerHTML = `<option value="all">📁 All Events (Full Photo Catalog)</option>` + eventOptions;
+    globalPicker.value = window.adminActiveEventId || 'all';
+
+    if (!globalPicker.dataset.listenerAttached) {
+      globalPicker.dataset.listenerAttached = 'true';
+      globalPicker.addEventListener('change', (e) => {
+        setAdminActiveEvent(e.target.value);
+      });
+    }
+  }
+
+  if (uploadSelect) {
+    uploadSelect.innerHTML = `<option value="">-- General / Default Event --</option>` +
+      (window.allEvents || []).map(evt => `<option value="${evt.id}">${evt.title || evt.name}</option>`).join('');
+    uploadSelect.value = window.adminActiveEventId === 'all' ? '' : window.adminActiveEventId;
+
+    if (!uploadSelect.dataset.listenerAttached) {
+      uploadSelect.dataset.listenerAttached = 'true';
+      uploadSelect.addEventListener('change', (e) => {
+        setAdminActiveEvent(e.target.value || 'all');
+      });
+    }
+  }
+}
+
+function setAdminActiveEvent(eventId) {
+  window.adminActiveEventId = eventId || 'all';
+
+  const globalPicker = document.getElementById('admin-global-event-picker');
+  if (globalPicker) globalPicker.value = window.adminActiveEventId;
+
+  const uploadSelect = document.getElementById('admin-upload-event-select');
+  if (uploadSelect) uploadSelect.value = window.adminActiveEventId === 'all' ? '' : window.adminActiveEventId;
+
+  updateStatsAndRender();
+}
+
+function setupEventManagement() {
+  const form = document.getElementById('create-event-form');
+  if (!form) return;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const titleInput = document.getElementById('event-title-input');
+    const dateInput = document.getElementById('event-date-input');
+    const descInput = document.getElementById('event-desc-input');
+    const statusInput = document.getElementById('event-status-input');
+
+    const title = titleInput.value.trim();
+    if (!title) return;
+
+    try {
+      const res = await adminFetch('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          name: title,
+          date: dateInput ? dateInput.value : '',
+          description: descInput ? descInput.value.trim() : '',
+          status: statusInput ? statusInput.value : 'active'
+        })
+      });
+
+      if (res.success) {
+        titleInput.value = '';
+        if (dateInput) dateInput.value = '';
+        if (descInput) descInput.value = '';
+        await fetchEventsAndRender();
+        alert(`Event '${title}' created successfully!`);
+      } else {
+        alert("Error creating event: " + res.error);
+      }
+    } catch (err) {
+      console.error("Create event error:", err);
+      alert("Failed to create event: " + err.message);
+    }
+  });
+}
+
+window.deleteEventItem = async function(id) {
+  const evt = window.allEvents.find(e => e.id === id);
+  const name = evt ? (evt.title || evt.name) : id;
+  if (confirm(`Are you sure you want to delete event "${name}"? Photos in this event will not be deleted, but will become uncategorized.`)) {
+    try {
+      const res = await adminFetch(`/api/events/${id}`, { method: 'DELETE' });
+      if (res.success) {
+        await fetchEventsAndRender();
+        await loadDashboardData();
+      } else {
+        alert("Error deleting event: " + res.error);
+      }
+    } catch (err) {
+      console.error("Delete event error:", err);
+    }
+  }
+};
+

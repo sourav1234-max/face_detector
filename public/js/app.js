@@ -4,6 +4,8 @@
 
 // Global state variables
 window.galleryCatalog = [];
+window.allEvents = [];
+window.selectedEventId = localStorage.getItem('public_active_event_id') || 'all';
 window.uploadQueue = [];
 window.queryDescriptor = null;
 window.searchQueryDescriptor = null;
@@ -85,6 +87,7 @@ async function fetchGallery() {
     const result = await response.json();
     if (result.success) {
       window.galleryCatalog = result.photos;
+      window.allEvents = result.events || [];
       window.publicGalleryEnabled = result.publicGalleryEnabled !== false;
       window.galleryHeading = result.galleryHeading || 'Gallery Catalog';
       // reset pagination when gallery refreshes
@@ -94,6 +97,10 @@ async function fetchGallery() {
       if (headingEl) {
         headingEl.innerText = window.galleryHeading;
       }
+      
+      // Render event dropdowns and banner
+      populatePublicEventDropdowns();
+      updateEventBanner();
       
       // Apply custom logo width if returned
       if (result.logoWidth) {
@@ -464,10 +471,19 @@ async function startBatchUpload() {
     return;
   }
 
+  window.publicBatchQueue.eventId = (!window.selectedEventId || window.selectedEventId === 'all') ? '' : window.selectedEventId;
+
   if (startUploadBtn) startUploadBtn.classList.add('disabled');
   if (clearQueueBtn) clearQueueBtn.classList.add('disabled');
 
   window.publicBatchQueue.start();
+}
+
+function getFilteredGalleryPhotos() {
+  if (!window.selectedEventId || window.selectedEventId === 'all') {
+    return window.galleryCatalog;
+  }
+  return window.galleryCatalog.filter(p => p.eventId === window.selectedEventId);
 }
 
 // Update the gallery catalog grid in UI
@@ -480,7 +496,8 @@ function updateGalleryUI() {
     headingEl.innerText = window.galleryHeading || 'Gallery Catalog';
   }
 
-  totalCountEl.innerText = window.galleryCatalog.length;
+  const filteredPhotos = getFilteredGalleryPhotos();
+  totalCountEl.innerText = filteredPhotos.length;
   grid.innerHTML = '';
 
   if (window.publicGalleryEnabled === false) {
@@ -494,13 +511,13 @@ function updateGalleryUI() {
     return;
   }
 
-  if (window.galleryCatalog.length === 0) {
+  if (filteredPhotos.length === 0) {
     emptyState.classList.remove('hidden');
     grid.classList.add('hidden');
     emptyState.innerHTML = `
       <i class="fa-regular fa-image empty-icon"></i>
       <h3>No Photos in Gallery</h3>
-      <p>Upload photos using the panel on the left to start building your gallery catalog.</p>
+      <p>No photos match the selected event or gallery is empty.</p>
     `;
     return;
   }
@@ -635,8 +652,9 @@ function renderGalleryPage() {
   const grid = document.getElementById('gallery-grid');
   const emptyState = document.getElementById('empty-gallery-state');
 
+  const photos = getFilteredGalleryPhotos();
   const start = 0;
-  const end = Math.min(window.galleryCatalog.length, GALLERY_PAGE_SIZE * (currentGalleryPage + 1));
+  const end = Math.min(photos.length, GALLERY_PAGE_SIZE * (currentGalleryPage + 1));
 
   grid.innerHTML = '';
 
@@ -650,7 +668,7 @@ function renderGalleryPage() {
   grid.classList.remove('hidden');
 
   for (let i = start; i < end; i++) {
-    const photo = window.galleryCatalog[i];
+    const photo = photos[i];
     const itemEl = document.createElement('div');
     itemEl.className = 'gallery-item';
     if (photo.id) itemEl.setAttribute('data-photo-id', photo.id);
@@ -1117,13 +1135,16 @@ async function performSearch() {
     return;
   }
 
+  const searchEventId = (!window.selectedEventId || window.selectedEventId === 'all') ? 'all' : window.selectedEventId;
+
   try {
     const response = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         descriptors: window.searchQueryDescriptors,
-        threshold: threshold
+        threshold: threshold,
+        eventId: searchEventId
       })
     });
     
@@ -1504,3 +1525,77 @@ function closeLightbox() {
   const canvas = document.getElementById('lightbox-canvas');
   if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
 }
+
+// --- Public Event Logic ---
+function renderPublicEventFilterPills() {
+  const container = document.getElementById('event-filter-pills');
+  if (!container) return;
+
+  const events = window.allEvents || [];
+  let html = `<button class="filter-pill ${(!window.selectedEventId || window.selectedEventId === 'all') ? 'active' : ''}" onclick="selectPublicEvent('all')">All Events</button>`;
+  
+  events.forEach(evt => {
+    const isSelected = window.selectedEventId === evt.id;
+    html += `<button class="filter-pill ${isSelected ? 'active' : ''}" onclick="selectPublicEvent('${evt.id}')">${evt.title || evt.name}</button>`;
+  });
+
+  container.innerHTML = html;
+}
+
+// --- Public Event Logic ---
+window.selectPublicEvent = function(eventId) {
+  window.selectedEventId = eventId || 'all';
+  try {
+    localStorage.setItem('public_active_event_id', window.selectedEventId);
+  } catch (e) {}
+
+  const globalPicker = document.getElementById('global-event-picker');
+  if (globalPicker) globalPicker.value = window.selectedEventId;
+
+  updateEventBanner();
+  currentGalleryPage = 0;
+  updateGalleryUI();
+};
+
+function updateEventBanner() {
+  const banner = document.getElementById('gallery-selected-event-banner');
+  const titleEl = document.getElementById('event-banner-title');
+  const descEl = document.getElementById('event-banner-desc');
+  const dateEl = document.getElementById('event-banner-date');
+  if (!banner) return;
+
+  if (!window.selectedEventId || window.selectedEventId === 'all') {
+    banner.style.display = 'none';
+    return;
+  }
+
+  const evt = (window.allEvents || []).find(e => e.id === window.selectedEventId);
+  if (!evt) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  banner.style.display = 'block';
+  if (titleEl) titleEl.innerText = evt.title || evt.name;
+  if (descEl) descEl.innerText = evt.description || 'Event Gallery';
+  if (dateEl) dateEl.innerText = evt.date ? `Date: ${evt.date}` : '';
+}
+
+function populatePublicEventDropdowns() {
+  const globalPicker = document.getElementById('global-event-picker');
+
+  const eventOptions = (window.allEvents || []).map(evt => `<option value="${evt.id}">🎉 ${evt.title || evt.name}</option>`).join('');
+
+  if (globalPicker) {
+    globalPicker.innerHTML = `<option value="all">🎉 All Events (Combined Catalog)</option>` + eventOptions;
+    globalPicker.value = window.selectedEventId || 'all';
+
+    if (!globalPicker.dataset.listenerAttached) {
+      globalPicker.dataset.listenerAttached = 'true';
+      globalPicker.addEventListener('change', (e) => {
+        selectPublicEvent(e.target.value);
+      });
+    }
+  }
+}
+

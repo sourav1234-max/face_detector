@@ -44,6 +44,22 @@
       </nav>
     </header>
 
+    <!-- Global Event Switcher Bar -->
+    <div class="global-event-bar">
+      <div class="global-event-wrapper">
+        <div class="event-label-group">
+          <i class="fa-solid fa-calendar-star event-icon-glow"></i>
+          <div>
+            <span class="event-bar-title">Select Active Event</span>
+            <span class="event-bar-sub">Uploads, photo browsing, and face searches apply to your selected event</span>
+          </div>
+        </div>
+        <select id="global-event-picker" class="global-event-select">
+          <option value="all">🎉 All Events (Combined Catalog)</option>
+        </select>
+      </div>
+    </div>
+
     <!-- Main Content -->
     <main class="app-main">
 
@@ -120,6 +136,17 @@
                   <button class="btn-icon" id="refresh-gallery-btn" title="Refresh Gallery">
                     <i class="fa-solid fa-rotate-right"></i>
                   </button>
+                </div>
+              </div>
+
+              <!-- Active Event Info Banner -->
+              <div id="gallery-selected-event-banner" style="display:none; margin-bottom: 16px; padding: 14px 18px; background: linear-gradient(135deg, rgba(139,92,246,0.12), rgba(59,130,246,0.08)); border: 1px solid rgba(139,92,246,0.25); border-radius: var(--border-radius-md); position: relative;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                  <div>
+                    <h3 id="event-banner-title" style="margin:0 0 4px 0; font-size:16px; font-weight:700; color:#fff;"></h3>
+                    <p id="event-banner-desc" style="margin:0; font-size:13px; color:var(--text-secondary); line-height:1.4;"></p>
+                  </div>
+                  <span id="event-banner-date" class="badge" style="background:rgba(139,92,246,0.2); color:#a78bfa; padding:4px 10px; border-radius:12px; font-size:11px; font-weight:600; white-space:nowrap;"></span>
                 </div>
               </div>
 

@@ -14,6 +14,12 @@ const {
   updatePhoto,
   deletePhotoRecord,
   getPhotoById,
+  readEventsDb,
+  writeEventsDb,
+  addEvent,
+  updateEvent,
+  deleteEvent,
+  getEventById,
   readSettings,
   writeSettings,
   invalidateSettingsCache,
@@ -803,10 +809,13 @@ app.get('/api/gallery', async (req, res) => {
     syncLocalUploadsIfNeeded().catch(err => console.error('[Local Sync] Trigger error:', err));
     const settings = await readSettings();
     const galleryHeading = settings.publicGalleryHeading || 'Gallery Catalog';
+    const events = await readEventsDb();
+    
     if (!settings.publicGalleryEnabled) {
       return res.json({
         success: true,
         photos: [],
+        events,
         publicGalleryEnabled: false,
         galleryHeading,
         logoWidth: settings.logoWidth,
@@ -822,9 +831,15 @@ app.get('/api/gallery', async (req, res) => {
       return status === 'approved' && isPublic === true;
     });
 
+    const requestedEventId = req.query.eventId;
+    if (requestedEventId && requestedEventId !== 'all') {
+      publicPhotos = publicPhotos.filter(photo => photo.eventId === requestedEventId);
+    }
+
     res.json({
       success: true,
       photos: publicPhotos,
+      events,
       publicGalleryEnabled: true,
       galleryHeading,
       logoWidth: settings.logoWidth,
@@ -833,6 +848,130 @@ app.get('/api/gallery', async (req, res) => {
     });
   } catch (err) {
     console.error('Gallery endpoint error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ---------- Events Endpoints ----------
+
+app.get('/api/events', async (req, res) => {
+  try {
+    const events = await readEventsDb();
+    const gallery = await readGalleryDb();
+    const photoCounts = {};
+    gallery.forEach(p => {
+      if (p.eventId) {
+        photoCounts[p.eventId] = (photoCounts[p.eventId] || 0) + 1;
+      }
+    });
+    const eventsWithCount = events.map(evt => ({
+      ...evt,
+      photoCount: photoCounts[evt.id] || 0
+    }));
+    res.json({ success: true, events: eventsWithCount });
+  } catch (err) {
+    console.error('Fetch events error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/events', async (req, res) => {
+  try {
+    const isAdmin = await isValidAdminSession(req);
+    if (!isAdmin) {
+      return res.status(401).json({ success: false, error: 'Unauthorized access.' });
+    }
+    const { title, name, description, date, coverUrl, status } = req.body;
+    const eventName = (name || title || '').trim();
+    if (!eventName) {
+      return res.status(400).json({ success: false, error: 'Event name is required.' });
+    }
+    const eventId = 'evt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    const newEvent = {
+      id: eventId,
+      title: eventName,
+      name: eventName,
+      description: description || '',
+      date: date || new Date().toISOString().split('T')[0],
+      coverUrl: coverUrl || '',
+      status: status || 'active',
+      createdAt: new Date().toISOString()
+    };
+    await addEvent(newEvent);
+    console.log(`[Events] Created new event: ${eventName} (${eventId})`);
+    res.json({ success: true, event: newEvent });
+  } catch (err) {
+    console.error('Create event error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/events/:id', async (req, res) => {
+  try {
+    const isAdmin = await isValidAdminSession(req);
+    if (!isAdmin) {
+      return res.status(401).json({ success: false, error: 'Unauthorized access.' });
+    }
+    const { id } = req.params;
+    const { title, name, description, date, coverUrl, status } = req.body;
+    const patch = {};
+    if (title || name) {
+      patch.title = (name || title).trim();
+      patch.name = (name || title).trim();
+    }
+    if (description !== undefined) patch.description = description;
+    if (date !== undefined) patch.date = date;
+    if (coverUrl !== undefined) patch.coverUrl = coverUrl;
+    if (status !== undefined) patch.status = status;
+
+    const updated = await updateEvent(id, patch);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Event not found.' });
+    }
+    console.log(`[Events] Updated event: ${id}`);
+    res.json({ success: true, event: updated });
+  } catch (err) {
+    console.error('Update event error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/events/:id', async (req, res) => {
+  try {
+    const isAdmin = await isValidAdminSession(req);
+    if (!isAdmin) {
+      return res.status(401).json({ success: false, error: 'Unauthorized access.' });
+    }
+    const { id } = req.params;
+    const deleted = await deleteEvent(id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: 'Event not found.' });
+    }
+    console.log(`[Events] Deleted event: ${id}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete event error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admin/photos/assign-event', async (req, res) => {
+  try {
+    const isAdmin = await isValidAdminSession(req);
+    if (!isAdmin) {
+      return res.status(401).json({ success: false, error: 'Unauthorized access.' });
+    }
+    const { photoIds, eventId } = req.body;
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'photoIds array is required.' });
+    }
+    for (const id of photoIds) {
+      await updatePhoto(id, { eventId: eventId || '' });
+    }
+    console.log(`[Admin] Assigned ${photoIds.length} photo(s) to event: '${eventId || 'General'}'`);
+    res.json({ success: true, count: photoIds.length });
+  } catch (err) {
+    console.error('Assign event error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -1042,6 +1181,7 @@ async function processUploadTask(req) {
 
   const newPhoto = {
     id: photoId,
+    eventId: req.body.eventId || '',
     fileId,
     filename,
     imageUrl,
@@ -1141,11 +1281,16 @@ app.post('/api/search', async (req, res) => {
     const gallery = await readGalleryDb();
     const matches = [];
     const isAdmin = await isValidAdminSession(req);
-    const approvedPhotos = gallery.filter(photo => {
+    let approvedPhotos = gallery.filter(photo => {
       const status = photo.status === undefined ? 'approved' : photo.status;
       const isPublic = photo.isPublic === undefined ? true : photo.isPublic;
       return isAdmin ? status === 'approved' : (status === 'approved' && isPublic === true);
     });
+
+    const eventId = req.body.eventId;
+    if (eventId && eventId !== 'all') {
+      approvedPhotos = approvedPhotos.filter(photo => photo.eventId === eventId);
+    }
 
     approvedPhotos.forEach(photo => {
       if (!photo.descriptors || photo.descriptors.length === 0) return;

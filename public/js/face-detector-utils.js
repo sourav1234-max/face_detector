@@ -631,6 +631,9 @@
           formData.append('photo', item.resizedFile);
           formData.append('descriptors', JSON.stringify(item.descriptors));
           formData.append('isPublic', String(this.isPublic));
+          if (this.eventId) {
+            formData.append('eventId', String(this.eventId));
+          }
 
           const response = await fetch('/api/upload', {
             method: 'POST',

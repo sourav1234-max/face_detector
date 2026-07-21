@@ -1342,3 +1342,104 @@ body {
   object-fit: contain;
 }
 
+/* Event Filter Pills */
+.filter-pill {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.filter-pill:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.filter-pill.active {
+  background: var(--primary-gradient);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.3);
+}
+
+/* ==========================================================================
+   Global Event Switcher Bar
+   ========================================================================== */
+.global-event-bar {
+  margin-bottom: 20px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(59, 130, 246, 0.10));
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: var(--border-radius-lg);
+  padding: 14px 20px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.global-event-bar.admin-event-bar {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(16, 185, 129, 0.10));
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.global-event-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.event-label-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.event-icon-glow {
+  font-size: 24px;
+  background: var(--primary-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.event-bar-title {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-display);
+}
+
+.event-bar-sub {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+
+.global-event-select {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1.5px solid var(--primary);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: var(--border-radius-md);
+  outline: none;
+  cursor: pointer;
+  min-width: 240px;
+  transition: var(--transition-smooth);
+}
+
+.global-event-select:focus {
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.5);
+}
+
+
+

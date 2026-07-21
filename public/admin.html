@@ -383,6 +383,22 @@
       </nav>
     </header>
 
+    <!-- Admin Global Event Switcher Bar -->
+    <div class="global-event-bar admin-event-bar">
+      <div class="global-event-wrapper">
+        <div class="event-label-group">
+          <i class="fa-solid fa-calendar-check event-icon-glow"></i>
+          <div>
+            <span class="event-bar-title">Admin Dashboard Event View</span>
+            <span class="event-bar-sub">Stats, photo moderation, upload targets & bulk actions will apply to the selected event</span>
+          </div>
+        </div>
+        <select id="admin-global-event-picker" class="global-event-select">
+          <option value="all">📁 All Events (Full Photo Catalog)</option>
+        </select>
+      </div>
+    </div>
+
     <!-- Dashboard Content -->
     <main class="app-main">
       <div class="admin-grid">
@@ -418,11 +434,65 @@
             </div>
           </div>
 
+          <!-- Event Management Panel -->
+          <div class="panel-card">
+            <div class="card-header">
+              <h2><i class="fa-solid fa-calendar-days" style="color:var(--primary); margin-right:6px;"></i>Event Management</h2>
+              <p>Create and manage events for photo grouping</p>
+            </div>
+
+            <!-- Create Event Form -->
+            <form id="create-event-form" style="margin-bottom: 16px;">
+              <div class="form-group" style="margin-bottom: 8px;">
+                <label class="form-label" for="event-title-input">Event Name *</label>
+                <input type="text" id="event-title-input" class="form-input" placeholder="e.g. Sayan & Riya's Wedding" required style="font-size:12px;">
+              </div>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
+                <div>
+                  <label class="form-label" for="event-date-input">Event Date</label>
+                  <input type="date" id="event-date-input" class="form-input" style="font-size:12px; padding: 6px 10px;">
+                </div>
+                <div>
+                  <label class="form-label" for="event-status-input">Status</label>
+                  <select id="event-status-input" class="form-input" style="font-size:12px; padding: 6px 10px;">
+                    <option value="active">Active</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label class="form-label" for="event-desc-input">Description (Optional)</label>
+                <input type="text" id="event-desc-input" class="form-input" placeholder="Location, occasion, notes..." style="font-size:12px;">
+              </div>
+              <button type="submit" class="btn btn-primary btn-block btn-sm">
+                <i class="fa-solid fa-calendar-plus"></i> Create New Event
+              </button>
+            </form>
+
+            <!-- Created Events List -->
+            <div style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
+              <h3 style="font-size:13px; font-weight:600; color:var(--text-secondary); margin-bottom:10px;">
+                Created Events (<span id="admin-events-count">0</span>)
+              </h3>
+              <div id="admin-events-list" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;">
+                <!-- Events rendered dynamically -->
+              </div>
+            </div>
+          </div>
+
           <!-- Direct Upload Panel -->
           <div class="panel-card">
             <div class="card-header">
               <h2>Direct Image Upload</h2>
               <p>Upload photos directly to gallery</p>
+            </div>
+
+            <!-- Upload Event Selector -->
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label class="form-label" for="admin-upload-event-select"><i class="fa-solid fa-tag" style="color:var(--primary); margin-right:4px;"></i>Assign to Event</label>
+              <select id="admin-upload-event-select" class="form-input" style="font-size:13px;">
+                <option value="">-- General / Default Event --</option>
+              </select>
             </div>
 
             <!-- Drag and Drop Zone -->
@@ -714,6 +784,7 @@
                   <tr>
                     <th>Photo</th>
                     <th>Original Name</th>
+                    <th>Event</th>
                     <th>Uploaded By</th>
                     <th>Date Uploaded</th>
                     <th>Faces</th>
