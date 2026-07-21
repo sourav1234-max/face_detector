@@ -148,38 +148,60 @@ body {
 
 /* Tabs Navigation */
 .app-nav {
-  display: flex;
-  background: rgba(255, 255, 255, 0.03);
-  padding: 6px;
-  border-radius: 30px;
-  border: 1px solid var(--panel-border);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(15, 22, 36, 0.75);
+  padding: 5px 6px;
+  border-radius: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  max-width: 100%;
 }
 
 .nav-btn {
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
   color: var(--text-secondary);
   font-family: var(--font-family);
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
-  padding: 10px 24px;
-  border-radius: 20px;
+  padding: 9px 20px;
+  border-radius: 30px;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  white-space: nowrap;
   transition: var(--transition-smooth);
 }
 
 .nav-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.03);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .nav-btn.active {
-  background: var(--primary-gradient);
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+  background: linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
+  border-color: transparent;
+  font-weight: 700;
+}
+
+.nav-btn.nav-admin-btn {
+  color: #c084fc;
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.nav-btn.nav-admin-btn:hover {
+  background: rgba(139, 92, 246, 0.18);
+  color: #d8b4fe;
+  border-color: rgba(139, 92, 246, 0.5);
 }
 
 /* ==========================================================================
@@ -2450,6 +2472,43 @@ body.protected-event-no-rightclick #lightbox-img {
 /* ---- Global event bar responsive improvements ---- */
 .event-bar-sub {
   max-width: 480px;
+}
+
+/* ---- Mobile navigation pill container styling ---- */
+@media (max-width: 640px) {
+  .app-header {
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 14px;
+  }
+
+  .app-nav {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    overflow-x: auto;
+    padding: 4px;
+    gap: 4px;
+    border-radius: 36px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .app-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-btn {
+    padding: 8px 12px;
+    font-size: 12px;
+    gap: 5px;
+    flex: 1;
+    min-height: 38px;
+    border-radius: 28px;
+    text-align: center;
+  }
 }
 
 /* ---- Compact footer on mobile ---- */

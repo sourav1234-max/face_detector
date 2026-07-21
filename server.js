@@ -810,12 +810,30 @@ app.get('/api/gallery', async (req, res) => {
     const settings = await readSettings();
     const galleryHeading = settings.publicGalleryHeading || 'Gallery Catalog';
     const events = await readEventsDb();
-    
+    let allEvt = events.find(e => e.id === 'all');
+    if (!allEvt) {
+      allEvt = {
+        id: 'all',
+        title: 'All Photos / All Events',
+        name: 'All Photos / All Events',
+        description: 'Combined catalog containing all event photos',
+        date: 'Always Active',
+        status: 'active',
+        passcode: settings.allEventsPasscode || '',
+        allowDownload: settings.allEventsAllowDownload !== false,
+        disableRightClick: !!settings.allEventsDisableRightClick,
+        announcementMessage: settings.galleryMessage || '',
+        isSystemEvent: true
+      };
+    }
+
+    const allEventsList = [allEvt, ...events.filter(e => e.id !== 'all')];
+
     if (!settings.publicGalleryEnabled) {
       return res.json({
         success: true,
         photos: [],
-        events,
+        events: allEventsList.map(e => { const { passcode, ...rest } = e; return rest; }),
         publicGalleryEnabled: false,
         galleryHeading,
         logoWidth: settings.logoWidth,
@@ -832,7 +850,7 @@ app.get('/api/gallery', async (req, res) => {
     });
 
     const isAdmin = await isValidAdminSession(req);
-    const publicEvents = events.map(evt => {
+    const publicEvents = allEventsList.map(evt => {
       const item = {
         ...evt,
         hasPasscode: !!(evt.passcode && evt.passcode.trim())
@@ -841,23 +859,25 @@ app.get('/api/gallery', async (req, res) => {
       return item;
     });
 
-    const requestedEventId = req.query.eventId;
-    if (requestedEventId && requestedEventId !== 'all') {
-      const targetEvent = events.find(e => e.id === requestedEventId);
-      if (targetEvent && targetEvent.passcode && targetEvent.passcode.trim() && !isAdmin) {
-        const providedPasscode = (req.headers['x-event-passcode'] || req.query.passcode || '').trim();
-        if (providedPasscode !== targetEvent.passcode.trim()) {
-          return res.json({
-            success: true,
-            photos: [],
-            events: publicEvents,
-            publicGalleryEnabled: true,
-            passcodeRequired: true,
-            eventId: requestedEventId,
-            error: 'Passcode required to view this private event.'
-          });
-        }
+    const requestedEventId = req.query.eventId || 'all';
+    const targetEvent = allEventsList.find(e => e.id === requestedEventId) || allEvt;
+
+    if (targetEvent && targetEvent.passcode && targetEvent.passcode.trim() && !isAdmin) {
+      const providedPasscode = (req.headers['x-event-passcode'] || req.query.passcode || '').trim();
+      if (providedPasscode !== targetEvent.passcode.trim()) {
+        return res.json({
+          success: true,
+          photos: [],
+          events: publicEvents,
+          publicGalleryEnabled: true,
+          passcodeRequired: true,
+          eventId: requestedEventId,
+          error: 'Passcode required to view this private event.'
+        });
       }
+    }
+
+    if (requestedEventId && requestedEventId !== 'all') {
       publicPhotos = publicPhotos.filter(photo => photo.eventId === requestedEventId);
     }
 
@@ -871,7 +891,7 @@ app.get('/api/gallery', async (req, res) => {
       allowPublicFaceAdjustment: settings.allowPublicFaceAdjustment !== false,
       logoWidth: settings.logoWidth,
       storageMode: getStorageMode(settings),
-      galleryMessage: settings.galleryMessage || ''
+      galleryMessage: targetEvent.announcementMessage || settings.galleryMessage || ''
     });
   } catch (err) {
     console.error('Gallery endpoint error:', err);
@@ -886,13 +906,36 @@ app.get('/api/events', async (req, res) => {
     const isAdmin = await isValidAdminSession(req);
     const events = await readEventsDb();
     const gallery = await readGalleryDb();
+    const settings = await readSettings();
+
+    let allEvt = events.find(e => e.id === 'all');
+    if (!allEvt) {
+      allEvt = {
+        id: 'all',
+        title: 'All Photos / All Events',
+        name: 'All Photos / All Events',
+        description: 'Combined catalog containing all event photos',
+        date: 'Always Active',
+        status: 'active',
+        passcode: settings.allEventsPasscode || '',
+        allowDownload: settings.allEventsAllowDownload !== false,
+        disableRightClick: !!settings.allEventsDisableRightClick,
+        announcementMessage: settings.galleryMessage || '',
+        isSystemEvent: true
+      };
+    } else {
+      allEvt = { ...allEvt, isSystemEvent: true };
+    }
+
     const photoCounts = {};
     gallery.forEach(p => {
       if (p.eventId) {
         photoCounts[p.eventId] = (photoCounts[p.eventId] || 0) + 1;
       }
     });
-    const eventsWithCount = events.map(evt => {
+
+    const userEvents = events.filter(e => e.id !== 'all');
+    const eventsWithCount = userEvents.map(evt => {
       const item = {
         ...evt,
         photoCount: photoCounts[evt.id] || 0,
@@ -903,7 +946,15 @@ app.get('/api/events', async (req, res) => {
       }
       return item;
     });
-    res.json({ success: true, events: eventsWithCount });
+
+    const allItem = {
+      ...allEvt,
+      photoCount: gallery.length,
+      hasPasscode: !!(allEvt.passcode && allEvt.passcode.trim())
+    };
+    if (!isAdmin) delete allItem.passcode;
+
+    res.json({ success: true, events: [allItem, ...eventsWithCount] });
   } catch (err) {
     console.error('Fetch events error:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -954,9 +1005,12 @@ app.put('/api/events/:id', async (req, res) => {
     const { id } = req.params;
     const { title, name, description, date, coverUrl, status, passcode, allowDownload, disableRightClick, announcementMessage } = req.body;
     const patch = {};
-    if (title || name) {
-      patch.title = (name || title).trim();
-      patch.name = (name || title).trim();
+    if (title !== undefined || name !== undefined) {
+      const eventName = (name || title || '').trim();
+      if (eventName) {
+        patch.title = eventName;
+        patch.name = eventName;
+      }
     }
     if (description !== undefined) patch.description = description;
     if (date !== undefined) patch.date = date;
@@ -967,10 +1021,38 @@ app.put('/api/events/:id', async (req, res) => {
     if (disableRightClick !== undefined) patch.disableRightClick = !!disableRightClick;
     if (announcementMessage !== undefined) patch.announcementMessage = announcementMessage.trim();
 
-    const updated = await updateEvent(id, patch);
+    let updated = await updateEvent(id, patch);
+    if (!updated && id === 'all') {
+      const newAllEvt = {
+        id: 'all',
+        title: patch.title || 'All Photos / All Events',
+        name: patch.name || 'All Photos / All Events',
+        description: patch.description || 'Combined catalog containing all event photos',
+        date: patch.date || 'Always Active',
+        status: patch.status || 'active',
+        passcode: patch.passcode || '',
+        allowDownload: patch.allowDownload !== undefined ? patch.allowDownload : true,
+        disableRightClick: patch.disableRightClick !== undefined ? patch.disableRightClick : false,
+        announcementMessage: patch.announcementMessage || '',
+        isSystemEvent: true,
+        createdAt: new Date().toISOString()
+      };
+      updated = await addEvent(newAllEvt);
+    }
+
     if (!updated) {
       return res.status(404).json({ success: false, error: 'Event not found.' });
     }
+
+    if (id === 'all') {
+      const settings = await readSettings();
+      settings.allEventsPasscode = updated.passcode;
+      settings.allEventsAllowDownload = updated.allowDownload;
+      settings.allEventsDisableRightClick = updated.disableRightClick;
+      settings.galleryMessage = updated.announcementMessage;
+      await writeSettings(settings);
+    }
+
     console.log(`[Events] Updated event: ${id}`);
     res.json({ success: true, event: updated });
   } catch (err) {
@@ -986,6 +1068,9 @@ app.delete('/api/events/:id', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Unauthorized access.' });
     }
     const { id } = req.params;
+    if (id === 'all') {
+      return res.status(400).json({ success: false, error: 'The All Photos system event cannot be deleted.' });
+    }
     const deleted = await deleteEvent(id);
     if (!deleted) {
       return res.status(404).json({ success: false, error: 'Event not found.' });
@@ -1605,6 +1690,56 @@ app.post('/api/detect-faces', upload.single('photo'), async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+app.post('/api/compute-descriptor', upload.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No image file uploaded' });
+    }
+
+    let box = null;
+    if (req.body.box) {
+      try {
+        box = typeof req.body.box === 'string' ? JSON.parse(req.body.box) : req.body.box;
+      } catch (e) {
+        box = null;
+      }
+    }
+
+    if (!box || typeof box.x !== 'number' || typeof box.y !== 'number' || typeof box.width !== 'number' || typeof box.height !== 'number') {
+      return res.status(400).json({ success: false, error: 'Valid box object with x, y, width, height is required.' });
+    }
+
+    const buffer = req.file.buffer;
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+    const tempDir = path.join(__dirname, 'scratch');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    const tempPath = path.join(tempDir, `compute_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${ext}`);
+    fs.writeFileSync(tempPath, buffer);
+
+    try {
+      const pyResult = await runPythonSingleFaceDescriptor(tempPath, box);
+      if (pyResult && pyResult.success) {
+        res.json(pyResult);
+      } else {
+        res.status(422).json({
+          success: false,
+          error: pyResult ? pyResult.error : 'Could not compute face descriptor from selected region.'
+        });
+      }
+    } finally {
+      if (fs.existsSync(tempPath)) {
+        try { fs.unlinkSync(tempPath); } catch (e) {}
+      }
+    }
+  } catch (err) {
+    console.error('Compute single face descriptor endpoint error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 app.post('/api/search', async (req, res) => {
   try {

@@ -1652,18 +1652,22 @@ function renderAdminEventsList() {
   const countEl = document.getElementById('admin-events-count');
   if (!container) return;
 
-  const events = window.allEvents;
-  if (countEl) countEl.innerText = events.length;
+  const events = window.allEvents || [];
+  const userEventsCount = events.filter(e => e.id !== 'all').length;
+  if (countEl) countEl.innerText = userEventsCount;
 
   if (events.length === 0) {
     container.innerHTML = `<div style="font-size:12px; color:var(--text-muted); padding:8px 0; text-align:center;">No events created yet. Use the form above to add your first event.</div>`;
     return;
   }
 
-  container.innerHTML = events.map(evt => `
-    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); border:1px solid var(--panel-border); padding:8px 12px; border-radius:var(--border-radius-sm);">
+  container.innerHTML = events.map(evt => {
+    const isAllSystem = evt.id === 'all' || evt.isSystemEvent;
+    return `
+    <div style="display:flex; justify-content:space-between; align-items:center; background:${isAllSystem ? 'rgba(59,130,246,0.06)' : 'rgba(255,255,255,0.02)'}; border:1px solid ${isAllSystem ? 'rgba(59,130,246,0.3)' : 'var(--panel-border)'}; padding:8px 12px; border-radius:var(--border-radius-sm);">
       <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:8px;">
         <strong style="font-size:13px; color:#fff;">${evt.title || evt.name}</strong>
+        ${isAllSystem ? `<span class="badge" style="background:rgba(59,130,246,0.2); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); padding:1px 6px; font-size:10px; margin-left:6px;"><i class="fa-solid fa-globe"></i> Global Catalog</span>` : ''}
         ${(evt.passcode || evt.hasPasscode) ? `<span class="badge" style="background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); padding:1px 6px; font-size:10px; margin-left:6px;"><i class="fa-solid fa-lock"></i> ${evt.passcode ? 'Passcode: ' + evt.passcode : 'Passcode Protected'}</span>` : ''}
         ${evt.allowDownload === false ? `<span class="badge" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-ban"></i> No Downloads</span>` : ''}
         ${evt.disableRightClick ? `<span class="badge" style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-shield"></i> Protected</span>` : ''}
@@ -1672,26 +1676,44 @@ function renderAdminEventsList() {
           <i class="fa-solid fa-image" style="margin-right:3px;"></i>${evt.photoCount || 0} photo(s)
         </div>
       </div>
-      <div style="display:flex; gap:4px;">
-        <button onclick="openEditEventModal('${evt.id}')" class="btn btn-secondary btn-sm" style="padding:4px 8px;" title="Edit Event Settings">
+      <div style="display:flex; gap:4px; align-items:center;">
+        <button type="button" data-action="edit-event" data-event-id="${evt.id}" class="btn btn-secondary btn-sm" style="padding:4px 8px;" title="Edit Event Settings">
           <i class="fa-solid fa-pen"></i>
         </button>
-        <button onclick="deleteEventItem('${evt.id}')" class="btn btn-secondary btn-sm" style="padding:4px 8px; color:var(--danger); border-color:rgba(239,68,68,0.2);" title="Delete Event">
+        ${!isAllSystem ? `
+        <button type="button" data-action="delete-event" data-event-id="${evt.id}" class="btn btn-secondary btn-sm" style="padding:4px 8px; color:var(--danger); border-color:rgba(239,68,68,0.2);" title="Delete Event">
           <i class="fa-solid fa-trash-can"></i>
-        </button>
+        </button>` : `<span title="Global System Catalog" style="opacity:0.3; padding:4px 6px; font-size:11px; color:var(--text-muted);"><i class="fa-solid fa-lock"></i></span>`}
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
+
+  if (!container.dataset.listenerAttached) {
+    container.dataset.listenerAttached = 'true';
+    container.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      const action = btn.getAttribute('data-action');
+      const eventId = btn.getAttribute('data-event-id');
+      if (action === 'edit-event') {
+        openEditEventModal(eventId);
+      } else if (action === 'delete-event') {
+        deleteEventItem(eventId);
+      }
+    });
+  }
 }
 
 function populateAdminEventDropdowns() {
   const globalPicker = document.getElementById('admin-global-event-picker');
   const uploadSelect = document.getElementById('admin-upload-event-select');
 
-  const eventOptions = (window.allEvents || []).map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
+  const customEvents = (window.allEvents || []).filter(e => e.id !== 'all');
+  const eventOptions = customEvents.map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
 
   if (globalPicker) {
-    globalPicker.innerHTML = `<option value="all">📁 All Events (Full Photo Catalog)</option>` + eventOptions;
+    globalPicker.innerHTML = `<option value="all">📁 All Photos / All Events (Full Catalog)</option>` + eventOptions;
     globalPicker.value = window.adminActiveEventId || 'all';
 
     if (!globalPicker.dataset.listenerAttached) {
@@ -1703,8 +1725,8 @@ function populateAdminEventDropdowns() {
   }
 
   if (uploadSelect) {
-    uploadSelect.innerHTML = `<option value="">-- General / Default Event --</option>` +
-      (window.allEvents || []).map(evt => `<option value="${evt.id}">${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
+    uploadSelect.innerHTML = `<option value="">-- General / All Photos Default --</option>` +
+      customEvents.map(evt => `<option value="${evt.id}">${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
     uploadSelect.value = window.adminActiveEventId === 'all' ? '' : window.adminActiveEventId;
 
     if (!uploadSelect.dataset.listenerAttached) {
@@ -1717,8 +1739,8 @@ function populateAdminEventDropdowns() {
 
   const defaultSelect = document.getElementById('default-public-event-select');
   if (defaultSelect) {
-    defaultSelect.innerHTML = `<option value="all">🎉 All Events (Full Photo Catalog)</option>` +
-      (window.allEvents || []).map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
+    defaultSelect.innerHTML = `<option value="all">🎉 All Photos / All Events (Default)</option>` +
+      customEvents.map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
     defaultSelect.value = window.defaultPublicEventId || 'all';
   }
 }
@@ -1817,8 +1839,9 @@ function setupEventManagement() {
         if (res.success) {
           closeEditEventModal();
           await fetchEventsAndRender();
+          alert(`Event '${title}' settings updated successfully!`);
         } else {
-          alert('Failed to update event: ' + res.error);
+          alert('Failed to update event: ' + (res.error || 'Server error'));
         }
       } catch (err) {
         console.error('Update event error:', err);
@@ -1832,15 +1855,25 @@ window.openEditEventModal = function(id) {
   const evt = (window.allEvents || []).find(e => e.id === id);
   if (!evt) return;
 
-  document.getElementById('edit-event-id').value = evt.id;
-  document.getElementById('edit-event-title').value = evt.title || evt.name || '';
-  document.getElementById('edit-event-date').value = evt.date || '';
-  document.getElementById('edit-event-status').value = evt.status || 'active';
-  document.getElementById('edit-event-desc').value = evt.description || '';
-  document.getElementById('edit-event-passcode').value = evt.passcode || '';
-  document.getElementById('edit-event-allow-download').checked = evt.allowDownload !== false;
-  document.getElementById('edit-event-disable-rightclick').checked = !!evt.disableRightClick;
-  document.getElementById('edit-event-announcement').value = evt.announcementMessage || '';
+  const idEl = document.getElementById('edit-event-id');
+  const titleEl = document.getElementById('edit-event-title');
+  const dateEl = document.getElementById('edit-event-date');
+  const statusEl = document.getElementById('edit-event-status');
+  const descEl = document.getElementById('edit-event-desc');
+  const passcodeEl = document.getElementById('edit-event-passcode');
+  const allowDlEl = document.getElementById('edit-event-allow-download');
+  const blockRcEl = document.getElementById('edit-event-disable-rightclick');
+  const announceEl = document.getElementById('edit-event-announcement');
+
+  if (idEl) idEl.value = evt.id;
+  if (titleEl) titleEl.value = evt.title || evt.name || '';
+  if (dateEl) dateEl.value = evt.date || '';
+  if (statusEl) statusEl.value = evt.status || 'active';
+  if (descEl) descEl.value = evt.description || '';
+  if (passcodeEl) passcodeEl.value = evt.passcode || '';
+  if (allowDlEl) allowDlEl.checked = evt.allowDownload !== false;
+  if (blockRcEl) blockRcEl.checked = !!evt.disableRightClick;
+  if (announceEl) announceEl.value = evt.announcementMessage || '';
 
   const modal = document.getElementById('edit-event-modal');
   if (modal) modal.style.display = 'flex';

@@ -919,89 +919,110 @@ async function handleSearchFileSelected(file) {
   const feedbackDesc = document.getElementById('feedback-desc');
   const searchBtn = document.getElementById('execute-search-btn');
 
-  // Reset
-  window.searchQueryImage = file;
-  searchBtn.classList.remove('disabled');
+  // Check file size for search image
+  if (file.size > MAX_UPLOAD_SIZE) {
+    alert('Search image is too large. Please use an image up to 30 MB.');
+    clearSearchFile();
+    return;
+  }
 
+  // Reset UI
   prompt.classList.add('hidden');
   previewContainer.classList.remove('hidden');
   feedbackCard.classList.remove('hidden');
 
   feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing Photo...`;
-  feedbackDesc.innerText = "Preparing image...";
+  feedbackDesc.innerText = "Normalizing orientation and loading image...";
 
   try {
-    // Render on canvas
-    const img = new Image();
-    // Check file size for search image
-    if (file.size > MAX_UPLOAD_SIZE) {
-      alert('Search image is too large. Please use an image up to 30 MB.');
-      clearSearchFile();
-      return;
+    let orientedRes = null;
+    if (window.FaceDetectorUtils && typeof window.FaceDetectorUtils.createOrientedCanvas === 'function') {
+      try {
+        orientedRes = await window.FaceDetectorUtils.createOrientedCanvas(file, 2048);
+      } catch (e) {
+        console.warn('createOrientedCanvas fallback in handleSearchFileSelected:', e);
+      }
     }
 
-    const url = URL.createObjectURL(file);
-    // Keep a reference so we can revoke on clear
-    window.searchQueryObjectUrl = url;
+    const sourceCanvas = orientedRes ? orientedRes.canvas : null;
+    const targetFile = orientedRes ? orientedRes.file : file;
 
-    img.onload = async () => {
-      const ctx = canvas.getContext('2d');
-      canvas.width = img.width;
-      canvas.height = img.height;
+    window.searchQueryOrientedFile = targetFile;
+    window.searchQueryOrientedCanvas = sourceCanvas;
+    window.searchQueryImage = targetFile;
+
+    // Render on search-preview-canvas
+    const ctx = canvas.getContext('2d');
+    if (sourceCanvas) {
+      canvas.width = sourceCanvas.width;
+      canvas.height = sourceCanvas.height;
+      ctx.drawImage(sourceCanvas, 0, 0);
+    } else {
+      const img = await window.FaceDetectorUtils.loadImageElement(file);
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
       ctx.drawImage(img, 0, 0);
-      try { URL.revokeObjectURL(url); } catch (e) {}
-      // clear stored object url since it's revoked
-      window.searchQueryObjectUrl = null;
+    }
 
-      let descriptors = [];
-      // Compute descriptors immediately
-      try {
-        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting face (browser)...`;
-        feedbackDesc.innerText = 'Running face-api.js in your browser...';
-        descriptors = await computeFaceDescriptorsWithTimeout(file, 20000);
-      } catch (faceErr) {
-        console.warn('Browser face detection failed/timed out, trying server-side...', faceErr);
-      }
-
-      if (!descriptors || descriptors.length === 0) {
-        try {
-          feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting face (server)...`;
-          feedbackDesc.innerText = 'Running robust server-side face detector...';
-          descriptors = await detectFacesOnServer(file);
-        } catch (serverErr) {
-          console.error('Server face detection failed:', serverErr);
-        }
-      }
-
-      // Limit to only 1 face for "Find My Photo" search
-      if (descriptors && descriptors.length > 1) {
-        descriptors = descriptors.slice(0, 1);
-      }
-
-      window.searchQueryDescriptors = descriptors;
-      window.searchQueryDescriptor = descriptors && descriptors.length > 0 ? descriptors[0].descriptor : null;
-
-      if (!descriptors || descriptors.length === 0) {
-        feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Detected`;
-        feedbackDesc.innerText = 'We could not detect any face in this image on the browser or server. Please choose a different photo.';
-        searchBtn.classList.add('disabled');
+    let descriptors = [];
+    try {
+      feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting face (browser)...`;
+      feedbackDesc.innerText = 'Running face-api.js in your browser...';
+      if (sourceCanvas) {
+        descriptors = await window.FaceDetectorUtils.detectFacesMultiScale(sourceCanvas);
       } else {
-        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face Detected`;
-        feedbackDesc.innerText = `Ready to search the gallery using 1 detected face.`;
-        searchBtn.classList.remove('disabled');
-
-        const adjustBtn = document.getElementById('adjust-search-face-btn');
-        if (adjustBtn) {
-          adjustBtn.style.display = window.allowPublicFaceAdjustment !== false ? 'inline-block' : 'none';
-        }
-        
-        // Auto-run search for best user experience
-        performSearch();
+        descriptors = await computeFaceDescriptorsWithTimeout(targetFile, 20000);
       }
-    };
-    img.src = url;
+    } catch (faceErr) {
+      console.warn('Browser face detection failed/timed out, trying server-side...', faceErr);
+    }
+
+    if (!descriptors || descriptors.length === 0) {
+      try {
+        feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Detecting face (server)...`;
+        feedbackDesc.innerText = 'Running robust server-side face detector...';
+        descriptors = await detectFacesOnServer(targetFile);
+      } catch (serverErr) {
+        console.error('Server face detection failed:', serverErr);
+      }
+    }
+
+    // Limit to only 1 face for "Find My Photo" search
+    if (descriptors && descriptors.length > 1) {
+      descriptors = descriptors.slice(0, 1);
+    }
+
+    window.searchQueryDescriptors = descriptors;
+    window.searchQueryDescriptor = descriptors && descriptors.length > 0 ? descriptors[0].descriptor : null;
+
+    // Draw face box overlay if detected
+    if (descriptors && descriptors.length > 0 && descriptors[0].box) {
+      const b = descriptors[0].box;
+      ctx.strokeStyle = '#10b981';
+      ctx.lineWidth = Math.max(3, Math.round(canvas.width / 200));
+      ctx.strokeRect(b.x, b.y, b.width, b.height);
+    }
+
+    const adjustBtn = document.getElementById('adjust-search-face-btn');
+
+    if (!descriptors || descriptors.length === 0) {
+      feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> No Face Auto-Detected`;
+      feedbackDesc.innerText = 'No face was automatically detected. Click "Adjust Face" to select your face box manually.';
+      searchBtn.classList.add('disabled');
+      if (adjustBtn) adjustBtn.style.display = 'inline-block';
+    } else {
+      feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Face Detected`;
+      feedbackDesc.innerText = `Ready to search the gallery using detected face.`;
+      searchBtn.classList.remove('disabled');
+      if (adjustBtn) adjustBtn.style.display = 'inline-block';
+
+      // Auto-run search for best user experience
+      performSearch();
+    }
   } catch (err) {
     console.error("Error displaying search image:", err);
+    feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#ef4444"></i> Image Error`;
+    feedbackDesc.innerText = err.message;
   }
 }
 
@@ -1013,14 +1034,17 @@ function clearSearchFile() {
   document.getElementById('execute-search-btn').classList.add('disabled');
   const adjustBtn = document.getElementById('adjust-search-face-btn');
   if (adjustBtn) adjustBtn.style.display = 'none';
-  // Revoke any object URL used for preview
+
   if (window.searchQueryObjectUrl) {
     try { URL.revokeObjectURL(window.searchQueryObjectUrl); } catch (e) {}
     window.searchQueryObjectUrl = null;
   }
   window.searchQueryImage = null;
+  window.searchQueryOrientedFile = null;
+  window.searchQueryOrientedCanvas = null;
+  window.searchQueryDescriptors = null;
+  window.searchQueryDescriptor = null;
 
-  // Clear preview canvas to free memory
   const canvas = document.getElementById('search-preview-canvas');
   if (canvas) {
     const ctx = canvas.getContext('2d');
@@ -1714,7 +1738,7 @@ function populatePublicEventDropdowns() {
   const eventOptions = (window.allEvents || []).map(evt => `<option value="${evt.id}">🎉 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
 
   if (globalPicker) {
-    globalPicker.innerHTML = `<option value="all">🎉 All Events (Combined Catalog)</option>` + eventOptions;
+    globalPicker.innerHTML = `<option value="all">🎉 All Photos / All Events (Combined Catalog)</option>` + eventOptions;
     globalPicker.value = window.selectedEventId || 'all';
 
     if (!globalPicker.dataset.listenerAttached) {
@@ -1887,7 +1911,10 @@ function setupPublicFaceAdjustModal() {
   const canvas = document.getElementById('public-face-adjust-canvas');
   if (canvas) {
     canvas.addEventListener('mousedown', handlePublicAdjustMouseDown);
-    canvas.addEventListener('mousemove', handlePublicAdjustMouseMove);
+    canvas.addEventListener('mousemove', (e) => {
+      handlePublicAdjustHoverCursor(e);
+      handlePublicAdjustMouseMove(e);
+    });
     canvas.addEventListener('mouseup', handlePublicAdjustMouseUp);
     canvas.addEventListener('mouseleave', handlePublicAdjustMouseUp);
 
@@ -1911,10 +1938,29 @@ function setupPublicFaceAdjustModal() {
       canvas.dispatchEvent(new MouseEvent('mouseup', {}));
     });
   }
+
+  window.addEventListener('resize', () => {
+    const modalEl = document.getElementById('public-face-adjust-modal');
+    if (modalEl && modalEl.style.display !== 'none') {
+      syncPublicCanvasDimensions();
+    }
+  });
+
+  if (typeof ResizeObserver !== 'undefined') {
+    const wrapper = document.getElementById('public-face-canvas-wrapper');
+    if (wrapper) {
+      new ResizeObserver(() => {
+        const modalEl = document.getElementById('public-face-adjust-modal');
+        if (modalEl && modalEl.style.display !== 'none') {
+          syncPublicCanvasDimensions();
+        }
+      }).observe(wrapper);
+    }
+  }
 }
 
 function openPublicFaceAdjustModal() {
-  if (!window.searchQueryImage) {
+  if (!window.searchQueryImage && !window.searchQueryOrientedCanvas && !window.searchQueryOrientedFile) {
     alert("Please select or capture a photo first.");
     return;
   }
@@ -1923,25 +1969,56 @@ function openPublicFaceAdjustModal() {
   const img = document.getElementById('public-face-adjust-img');
   if (!modal || !img) return;
 
-  const objectUrl = (typeof window.searchQueryImage === 'string') 
-    ? window.searchQueryImage 
-    : URL.createObjectURL(window.searchQueryImage);
+  // Make modal visible FIRST so element dimensions (clientWidth, clientHeight) can be measured accurately
+  modal.style.display = 'flex';
 
-  img.onload = () => {
+  let objectUrl = '';
+  if (window.searchQueryOrientedCanvas) {
+    objectUrl = window.searchQueryOrientedCanvas.toDataURL('image/jpeg');
+  } else if (typeof window.searchQueryImage === 'string') {
+    objectUrl = window.searchQueryImage;
+  } else if (window.searchQueryOrientedFile) {
+    objectUrl = URL.createObjectURL(window.searchQueryOrientedFile);
+  } else {
+    objectUrl = URL.createObjectURL(window.searchQueryImage);
+  }
+
+  const setupModalContent = () => {
     syncPublicCanvasDimensions();
     if (window.searchQueryDescriptors && window.searchQueryDescriptors.length > 0 && window.searchQueryDescriptors[0].box) {
       const b = window.searchQueryDescriptors[0].box;
-      publicAdjustBox = { x: b.x || b.left || 0, y: b.y || b.top || 0, width: b.width || (b.right - b.left) || 100, height: b.height || (b.bottom - b.top) || 100 };
+      publicAdjustBox = {
+        x: Math.round(b.x || b.left || 0),
+        y: Math.round(b.y || b.top || 0),
+        width: Math.round(b.width || (b.right - b.left) || 100),
+        height: Math.round(b.height || (b.bottom - b.top) || 100)
+      };
     } else {
       const nw = img.naturalWidth || 400;
       const nh = img.naturalHeight || 400;
-      publicAdjustBox = { x: Math.round(nw * 0.2), y: Math.round(nh * 0.2), width: Math.round(nw * 0.6), height: Math.round(nh * 0.6) };
+      const bw = Math.round(nw * 0.4);
+      const bh = Math.round(nh * 0.4);
+      publicAdjustBox = {
+        x: Math.round((nw - bw) / 2),
+        y: Math.round((nh - bh) / 2),
+        width: bw,
+        height: bh
+      };
     }
     drawPublicAdjustCanvas();
   };
 
-  img.src = objectUrl;
-  modal.style.display = 'flex';
+  img.onload = () => {
+    requestAnimationFrame(() => {
+      setupModalContent();
+    });
+  };
+
+  if (img.src === objectUrl && img.complete) {
+    setupModalContent();
+  } else {
+    img.src = objectUrl;
+  }
 }
 
 function closePublicFaceAdjustModal() {
@@ -1953,8 +2030,13 @@ function syncPublicCanvasDimensions() {
   const img = document.getElementById('public-face-adjust-img');
   const canvas = document.getElementById('public-face-adjust-canvas');
   if (!img || !canvas) return;
-  canvas.width = img.clientWidth || img.width;
-  canvas.height = img.clientHeight || img.height;
+  const w = img.clientWidth || img.width || 400;
+  const h = img.clientHeight || img.height || 400;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+    drawPublicAdjustCanvas();
+  }
 }
 
 function getPublicCanvasScale() {
@@ -1979,20 +2061,23 @@ function drawPublicAdjustCanvas() {
   const bh = publicAdjustBox.height * scaleY;
   const HANDLE_SIZE = 10;
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-  ctx.fillRect(0, 0, canvas.width, by);
-  ctx.fillRect(0, by, bx, bh);
-  ctx.fillRect(bx + bw, by, canvas.width - (bx + bw), bh);
-  ctx.fillRect(0, by + bh, canvas.width, canvas.height - (by + bh));
+  // Darken background overlay
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(0, 0, canvas.width, Math.max(0, by));
+  ctx.fillRect(0, by, Math.max(0, bx), bh);
+  ctx.fillRect(bx + bw, by, Math.max(0, canvas.width - (bx + bw)), bh);
+  ctx.fillRect(0, by + bh, canvas.width, Math.max(0, canvas.height - (by + bh)));
 
-  ctx.fillStyle = 'rgba(139, 92, 246, 0.2)';
+  // Highlight box area
+  ctx.fillStyle = 'rgba(139, 92, 246, 0.22)';
   ctx.fillRect(bx, by, bw, bh);
 
+  // Border outline
   ctx.strokeStyle = '#a78bfa';
   ctx.lineWidth = 2.5;
-  ctx.setLineDash([]);
   ctx.strokeRect(bx, by, bw, bh);
 
+  // Label badge
   const labelText = 'Your Face Area';
   ctx.font = '600 12px Inter, sans-serif';
   const textWidth = ctx.measureText(labelText).width;
@@ -2001,20 +2086,67 @@ function drawPublicAdjustCanvas() {
   ctx.fillStyle = '#ffffff';
   ctx.fillText(labelText, bx + 6, Math.max(14, by - 7));
 
-  const handles = {
-    nw: { x: bx, y: by },
-    ne: { x: bx + bw, y: by },
-    se: { x: bx + bw, y: by + bh },
-    sw: { x: bx, y: by + bh }
-  };
+  // 8 Drag Handles (Corners + Edges)
+  const handles = [
+    { x: bx, y: by },
+    { x: bx + bw / 2, y: by },
+    { x: bx + bw, y: by },
+    { x: bx + bw, y: by + bh / 2 },
+    { x: bx + bw, y: by + bh },
+    { x: bx + bw / 2, y: by + bh },
+    { x: bx, y: by + bh },
+    { x: bx, y: by + bh / 2 }
+  ];
+
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#8b5cf6';
   ctx.lineWidth = 2;
 
-  Object.values(handles).forEach(h => {
+  handles.forEach(h => {
     ctx.fillRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
     ctx.strokeRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
   });
+}
+
+function handlePublicAdjustHoverCursor(e) {
+  if (publicAdjustIsDragging) return;
+  const canvas = document.getElementById('public-face-adjust-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const { scaleX, scaleY } = getPublicCanvasScale();
+  const bx = publicAdjustBox.x * scaleX;
+  const by = publicAdjustBox.y * scaleY;
+  const bw = publicAdjustBox.width * scaleX;
+  const bh = publicAdjustBox.height * scaleY;
+  const HANDLE_SIZE = 14;
+
+  const handles = [
+    { mode: 'nwse-resize', x: bx, y: by },
+    { mode: 'ns-resize',   x: bx + bw / 2, y: by },
+    { mode: 'nesw-resize', x: bx + bw, y: by },
+    { mode: 'ew-resize',   x: bx + bw, y: by + bh / 2 },
+    { mode: 'nwse-resize', x: bx + bw, y: by + bh },
+    { mode: 'ns-resize',   x: bx + bw / 2, y: by + bh },
+    { mode: 'nesw-resize', x: bx, y: by + bh },
+    { mode: 'ew-resize',   x: bx, y: by + bh / 2 }
+  ];
+
+  for (const h of handles) {
+    if (Math.abs(mx - h.x) <= HANDLE_SIZE && Math.abs(my - h.y) <= HANDLE_SIZE) {
+      canvas.style.cursor = h.mode;
+      return;
+    }
+  }
+
+  if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+    canvas.style.cursor = 'move';
+    return;
+  }
+
+  canvas.style.cursor = 'crosshair';
 }
 
 function handlePublicAdjustMouseDown(e) {
@@ -2036,9 +2168,13 @@ function handlePublicAdjustMouseDown(e) {
 
   const handles = {
     'resize-nw': { x: bx, y: by },
+    'resize-n':  { x: bx + bw / 2, y: by },
     'resize-ne': { x: bx + bw, y: by },
+    'resize-e':  { x: bx + bw, y: by + bh / 2 },
     'resize-se': { x: bx + bw, y: by + bh },
-    'resize-sw': { x: bx, y: by + bh }
+    'resize-s':  { x: bx + bw / 2, y: by + bh },
+    'resize-sw': { x: bx, y: by + bh },
+    'resize-w':  { x: bx, y: by + bh / 2 }
   };
 
   for (const [mode, h] of Object.entries(handles)) {
@@ -2093,24 +2229,24 @@ function handlePublicAdjustMouseMove(e) {
     publicAdjustBox.x = newX;
     publicAdjustBox.y = newY;
   } else if (publicAdjustDragMode === 'draw') {
-    const currX = publicAdjustInitialBox.x;
-    const currY = publicAdjustInitialBox.y;
-    let currW = Math.round(nx - currX);
-    let currH = Math.round(ny - currY);
+    const startX = publicAdjustDragStart.nx;
+    const startY = publicAdjustDragStart.ny;
+    let currW = Math.round(nx - startX);
+    let currH = Math.round(ny - startY);
 
     if (currW < 0) {
-      publicAdjustBox.x = Math.max(0, currX + currW);
+      publicAdjustBox.x = Math.max(0, Math.round(startX + currW));
       publicAdjustBox.width = Math.abs(currW);
     } else {
-      publicAdjustBox.x = currX;
-      publicAdjustBox.width = Math.min(maxW - currX, currW);
+      publicAdjustBox.x = Math.round(startX);
+      publicAdjustBox.width = Math.min(maxW - startX, currW);
     }
     if (currH < 0) {
-      publicAdjustBox.y = Math.max(0, currY + currH);
+      publicAdjustBox.y = Math.max(0, Math.round(startY + currH));
       publicAdjustBox.height = Math.abs(currH);
     } else {
-      publicAdjustBox.y = currY;
-      publicAdjustBox.height = Math.min(maxH - currY, currH);
+      publicAdjustBox.y = Math.round(startY);
+      publicAdjustBox.height = Math.min(maxH - startY, currH);
     }
   } else if (publicAdjustDragMode && publicAdjustDragMode.startsWith('resize-')) {
     const mode = publicAdjustDragMode.replace('resize-', '');
@@ -2121,18 +2257,20 @@ function handlePublicAdjustMouseMove(e) {
 
     if (mode.includes('w')) {
       const targetRight = publicAdjustInitialBox.x + publicAdjustInitialBox.width;
-      newX = Math.max(0, Math.min(targetRight - 15, publicAdjustInitialBox.x + dNx));
+      newX = Math.max(0, Math.min(targetRight - 15, Math.round(publicAdjustInitialBox.x + dNx)));
       newW = targetRight - newX;
     } else if (mode.includes('e')) {
-      newW = Math.max(15, Math.min(maxW - publicAdjustInitialBox.x, publicAdjustInitialBox.width + dNx));
+      newW = Math.max(15, Math.min(maxW - publicAdjustInitialBox.x, Math.round(publicAdjustInitialBox.width + dNx)));
     }
+
     if (mode.includes('n')) {
       const targetBottom = publicAdjustInitialBox.y + publicAdjustInitialBox.height;
-      newY = Math.max(0, Math.min(targetBottom - 15, publicAdjustInitialBox.y + dNy));
+      newY = Math.max(0, Math.min(targetBottom - 15, Math.round(publicAdjustInitialBox.y + dNy)));
       newH = targetBottom - newY;
     } else if (mode.includes('s')) {
-      newH = Math.max(15, Math.min(maxH - publicAdjustInitialBox.y, publicAdjustInitialBox.height + dNy));
+      newH = Math.max(15, Math.min(maxH - publicAdjustInitialBox.y, Math.round(publicAdjustInitialBox.height + dNy)));
     }
+
     publicAdjustBox.x = newX;
     publicAdjustBox.y = newY;
     publicAdjustBox.width = newW;
@@ -2156,47 +2294,35 @@ async function handlePublicFaceAdjustApply() {
   const feedbackDesc = document.getElementById('feedback-desc');
   const searchBtn = document.getElementById('execute-search-btn');
 
-  if (!img || !window.searchQueryImage) return;
+  if (!img || (!window.searchQueryImage && !window.searchQueryOrientedFile)) return;
   closePublicFaceAdjustModal();
 
-  if (feedbackTitle) feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing Adjusted Face...`;
-  if (feedbackDesc) feedbackDesc.innerText = 'Calculating face descriptor from your custom box...';
+  if (feedbackTitle) feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing Custom Face Box...`;
+  if (feedbackDesc) feedbackDesc.innerText = 'Calculating face descriptor from your selected box...';
 
   try {
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = publicAdjustBox.width;
-    tempCanvas.height = publicAdjustBox.height;
-    const ctx = tempCanvas.getContext('2d');
-    ctx.drawImage(
-      img,
-      publicAdjustBox.x, publicAdjustBox.y, publicAdjustBox.width, publicAdjustBox.height,
-      0, 0, publicAdjustBox.width, publicAdjustBox.height
-    );
+    const targetBox = {
+      x: Math.round(publicAdjustBox.x),
+      y: Math.round(publicAdjustBox.y),
+      width: Math.round(publicAdjustBox.width),
+      height: Math.round(publicAdjustBox.height)
+    };
 
-    const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/jpeg', 0.95));
-    const croppedFile = new File([blob], 'adjusted_face.jpg', { type: 'image/jpeg' });
+    const targetFile = window.searchQueryOrientedFile || window.searchQueryImage;
+    const descriptor = await window.FaceDetectorUtils.extractDescriptorForBox(img, targetBox, targetFile);
 
-    let descriptors = [];
-    try {
-      descriptors = await computeFaceDescriptorsWithTimeout(croppedFile, 15000);
-    } catch (e) {
-      console.warn("Client descriptor on cropped face failed, trying server...", e);
-    }
+    if (descriptor && Array.isArray(descriptor) && descriptor.length === 128) {
+      window.searchQueryDescriptors = [{ box: targetBox, descriptor: descriptor }];
+      window.searchQueryDescriptor = descriptor;
 
-    if (!descriptors || descriptors.length === 0) {
-      descriptors = await detectFacesOnServer(croppedFile);
-    }
-
-    if (descriptors && descriptors.length > 0) {
-      window.searchQueryDescriptors = descriptors;
-      window.searchQueryDescriptor = descriptors[0].descriptor;
       if (feedbackTitle) feedbackTitle.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> Custom Face Box Ready`;
-      if (feedbackDesc) feedbackDesc.innerText = `Searching gallery with your custom adjusted face region...`;
+      if (feedbackDesc) feedbackDesc.innerText = `Searching gallery with your custom face region...`;
       if (searchBtn) searchBtn.classList.remove('disabled');
+
       performSearch();
     } else {
-      if (feedbackTitle) feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Low Face Details`;
-      if (feedbackDesc) feedbackDesc.innerText = 'Could not extract features from the selected region. Please try adjusting the box to include the full face.';
+      if (feedbackTitle) feedbackTitle.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> Could Not Extract Features`;
+      if (feedbackDesc) feedbackDesc.innerText = 'Could not extract features from the selected box. Please adjust the box to include the full face (eyes, nose, and mouth).';
     }
   } catch (err) {
     console.error("Public face adjust apply error:", err);

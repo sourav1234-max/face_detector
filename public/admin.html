@@ -1077,65 +1077,80 @@
         </div>
       </div>
     </div>
+  </div>
+
   <!-- EDIT EVENT MODAL -->
-  <div id="edit-event-modal" class="auth-overlay" style="display:none; z-index: 10006;">
-    <div class="auth-card" style="max-width: 460px; text-align: left;">
-      <div style="display:flex; justify-space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--panel-border); padding-bottom:10px;">
-        <h2 style="font-family: var(--font-display); font-size:16px; font-weight:700; color:#fff; margin:0;">
-          <i class="fa-solid fa-pen-to-square" style="color:var(--primary); margin-right:6px;"></i>Edit Event Settings
+  <div id="edit-event-modal" class="auth-overlay" style="display:none; z-index: 10006;" onclick="if(event.target===this) closeEditEventModal();">
+    <div class="auth-card" style="max-width: 500px; width: 90vw; text-align: left; background: #0e1422; border: 1px solid var(--panel-border); box-shadow: 0 16px 40px rgba(0,0,0,0.6); border-radius: var(--border-radius-lg); padding: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; border-bottom: 1px solid var(--panel-border); padding-bottom: 12px;">
+        <h2 style="font-family: var(--font-display); font-size: 17px; font-weight: 700; color: #fff; margin: 0; display: flex; align-items: center; gap: 8px;">
+          <i class="fa-solid fa-pen-to-square" style="color: var(--primary);"></i> Edit Event Settings
         </h2>
-        <button type="button" onclick="closeEditEventModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:16px;">
+        <button type="button" onclick="closeEditEventModal()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--panel-border); color: var(--text-secondary); cursor: pointer; font-size: 14px; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: var(--transition-smooth);" title="Close Modal">
           <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
 
       <form id="edit-event-form">
         <input type="hidden" id="edit-event-id">
-        <div class="form-group" style="margin-bottom: 10px;">
-          <label class="form-label">Event Name *</label>
-          <input type="text" id="edit-event-title" class="form-input" required style="font-size:12px;">
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label" style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Event Name *</label>
+          <input type="text" id="edit-event-title" class="form-input" required style="font-size: 13px; width: 100%; padding: 10px 12px; background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border); border-radius: var(--border-radius-sm); color: #fff;">
         </div>
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:10px;">
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
           <div>
-            <label class="form-label">Event Date</label>
-            <input type="date" id="edit-event-date" class="form-input" style="font-size:12px; padding: 6px 10px;">
+            <label class="form-label" style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Event Date</label>
+            <input type="date" id="edit-event-date" class="form-input" style="font-size: 13px; width: 100%; padding: 9px 12px; background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border); border-radius: var(--border-radius-sm); color: #fff;">
           </div>
           <div>
-            <label class="form-label">Status</label>
-            <select id="edit-event-status" class="form-input" style="font-size:12px; padding: 6px 10px;">
+            <label class="form-label" style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Status</label>
+            <select id="edit-event-status" class="form-input" style="font-size: 13px; width: 100%; padding: 9px 12px; background: rgba(20, 27, 43, 0.95); border: 1px solid var(--panel-border); border-radius: var(--border-radius-sm); color: #fff;">
               <option value="active">Active</option>
               <option value="archived">Archived</option>
             </select>
           </div>
         </div>
-        <div class="form-group" style="margin-bottom: 10px;">
-          <label class="form-label">Description</label>
-          <input type="text" id="edit-event-desc" class="form-input" style="font-size:12px;">
-        </div>
-        <div class="form-group" style="margin-bottom: 10px;">
-          <label class="form-label"><i class="fa-solid fa-key" style="color:var(--primary); margin-right:4px;"></i>Event Passcode (Optional)</label>
-          <input type="password" id="edit-event-passcode" class="form-input" placeholder="Leave blank for public access" style="font-size:12px;">
+
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label" style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Description</label>
+          <input type="text" id="edit-event-desc" class="form-input" style="font-size: 13px; width: 100%; padding: 10px 12px; background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border); border-radius: var(--border-radius-sm); color: #fff;">
         </div>
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:10px;">
-          <div style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:4px; border:1px solid var(--panel-border);">
-            <input type="checkbox" id="edit-event-allow-download" style="accent-color:var(--primary); cursor:pointer;">
-            <label for="edit-event-allow-download" style="font-size:11px; cursor:pointer; color:#fff;"><i class="fa-solid fa-download"></i> Allow Download</label>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label" style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">
+            <i class="fa-solid fa-key" style="color: var(--primary); margin-right: 4px;"></i> Event Passcode (Optional)
+          </label>
+          <input type="password" id="edit-event-passcode" class="form-input" placeholder="Leave blank for public access" style="font-size: 13px; width: 100%; padding: 10px 12px; background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border); border-radius: var(--border-radius-sm); color: #fff;">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+          <div style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: var(--border-radius-sm); border: 1px solid var(--panel-border);">
+            <input type="checkbox" id="edit-event-allow-download" style="width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer;">
+            <label for="edit-event-allow-download" style="font-size: 12px; cursor: pointer; color: #fff; user-select: none;">
+              <i class="fa-solid fa-download" style="margin-right: 4px; color: var(--primary);"></i> Allow Download
+            </label>
           </div>
-          <div style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:4px; border:1px solid var(--panel-border);">
-            <input type="checkbox" id="edit-event-disable-rightclick" style="accent-color:var(--danger); cursor:pointer;">
-            <label for="edit-event-disable-rightclick" style="font-size:11px; cursor:pointer; color:#fff;"><i class="fa-solid fa-ban"></i> Block Right-Click</label>
+          <div style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: var(--border-radius-sm); border: 1px solid var(--panel-border);">
+            <input type="checkbox" id="edit-event-disable-rightclick" style="width: 16px; height: 16px; accent-color: var(--danger); cursor: pointer;">
+            <label for="edit-event-disable-rightclick" style="font-size: 12px; cursor: pointer; color: #fff; user-select: none;">
+              <i class="fa-solid fa-ban" style="margin-right: 4px; color: var(--danger);"></i> Block Right-Click
+            </label>
           </div>
         </div>
 
-        <div class="form-group" style="margin-bottom: 16px;">
-          <label class="form-label"><i class="fa-solid fa-bullhorn" style="color:var(--primary); margin-right:4px;"></i>Event Announcement Banner</label>
-          <input type="text" id="edit-event-announcement" class="form-input" placeholder="Custom message for this event banner..." style="font-size:12px;">
+        <div class="form-group" style="margin-bottom: 18px;">
+          <label class="form-label" style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">
+            <i class="fa-solid fa-bullhorn" style="color: var(--primary); margin-right: 4px;"></i> Event Announcement Banner
+          </label>
+          <input type="text" id="edit-event-announcement" class="form-input" placeholder="Custom banner announcement for this event..." style="font-size: 13px; width: 100%; padding: 10px 12px; background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border); border-radius: var(--border-radius-sm); color: #fff;">
         </div>
 
-        <div style="display:flex; gap:8px;">
-          <button type="button" onclick="closeEditEventModal()" class="btn btn-secondary btn-block" style="flex:1;">Cancel</button>
-          <button type="submit" class="btn btn-primary btn-block" style="flex:1.5;"><i class="fa-solid fa-floppy-disk"></i> Save Changes</button>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+          <button type="button" onclick="closeEditEventModal()" class="btn btn-secondary" style="flex: 1; padding: 10px;">Cancel</button>
+          <button type="submit" class="btn btn-primary" style="flex: 1.5; padding: 10px;">
+            <i class="fa-solid fa-floppy-disk"></i> Save Changes
+          </button>
         </div>
       </form>
     </div>
