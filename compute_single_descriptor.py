@@ -38,6 +38,15 @@ def main():
             if img.mode != "RGB":
                 img = img.convert("RGB")
 
+            # =========================================================================
+            # FEATURE: Vertical (Portrait) Orientation Standardization
+            # -------------------------------------------------------------------------
+            # Check if EXIF-corrected image is landscape (width > height).
+            # If landscape, rotate 90° clockwise to make it vertical before descriptor calculation.
+            # =========================================================================
+            if img.width > img.height:
+                img = img.rotate(-90, expand=True)
+
             orig_width, orig_height = img.size
 
             max_size = 1600

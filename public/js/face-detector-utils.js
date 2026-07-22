@@ -167,6 +167,28 @@
     ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
     ctx.restore();
 
+    // =========================================================================
+    // FEATURE: Vertical (Portrait) Orientation Standardization
+    // -------------------------------------------------------------------------
+    // 1. Correct EXIF orientation metadata first (handled above).
+    // 2. Check if the EXIF-corrected image is horizontal (landscape: width > height).
+    // 3. If landscape, rotate 90° clockwise to make it vertical (portrait) before face detection and upload.
+    // 4. If already vertical (height >= width), leave unchanged.
+    // =========================================================================
+    if (canvas.width > canvas.height) {
+      const verticalCanvas = document.createElement('canvas');
+      verticalCanvas.width = canvas.height;
+      verticalCanvas.height = canvas.width;
+      const vertCtx = verticalCanvas.getContext('2d');
+      vertCtx.save();
+      vertCtx.translate(verticalCanvas.width / 2, verticalCanvas.height / 2);
+      vertCtx.rotate((90 * Math.PI) / 180);
+      vertCtx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+      vertCtx.restore();
+
+      canvas = verticalCanvas;
+    }
+
     // Export optimized Blob and File
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
     const baseName = fileName.replace(/\.[^/.]+$/, '');
@@ -175,14 +197,14 @@
       lastModified: Date.now()
     });
 
-    console.log(`[Image Processor] Processed ${fileName}: ${origWidth}x${origHeight} -> ${canvas.width}x${canvas.height} (EXIF Orientation: ${orientation}, Size: ${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`[Image Processor] Processed ${fileName}: ${canvas.width}x${canvas.height} (Vertical portrait, EXIF Orientation: ${orientation}, Size: ${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
 
     return {
       canvas,
       blob,
       file: resizedFile,
-      originalWidth: origWidth,
-      originalHeight: origHeight,
+      originalWidth: canvas.width,
+      originalHeight: canvas.height,
       orientation
     };
   }
@@ -313,6 +335,53 @@
   }
 
   /**
+   * Map face bounding box (x, y, width, height) from rotated space back to unrotated space.
+   */
+  function mapBoxToOriginal(box, angle, currW, currH) {
+    const { x, y, width, height } = box;
+    const top = y;
+    const left = x;
+    const bottom = y + height;
+    const right = x + width;
+
+    let origLeft, origRight, origTop, origBottom;
+
+    if (angle === 90) {
+      origLeft = top;
+      origRight = bottom;
+      origTop = currH - right;
+      origBottom = currH - left;
+    } else if (angle === 180) {
+      origLeft = currW - right;
+      origRight = currW - left;
+      origTop = currH - bottom;
+      origBottom = currH - top;
+    } else if (angle === 270) {
+      origLeft = currW - bottom;
+      origRight = currW - top;
+      origTop = left;
+      origBottom = right;
+    } else {
+      origLeft = left;
+      origRight = right;
+      origTop = top;
+      origBottom = bottom;
+    }
+
+    origLeft = Math.max(0, Math.min(currW, origLeft));
+    origRight = Math.max(0, Math.min(currW, origRight));
+    origTop = Math.max(0, Math.min(currH, origTop));
+    origBottom = Math.max(0, Math.min(currH, origBottom));
+
+    return {
+      x: Math.round(origLeft),
+      y: Math.round(origTop),
+      width: Math.round(origRight - origLeft),
+      height: Math.round(origBottom - origTop)
+    };
+  }
+
+  /**
    * Internal implementation of multi-scale face detection pipeline
    */
   async function runDetectFacesMultiScaleInternal(inputElement) {
@@ -336,90 +405,130 @@
       descriptor: Array.from(det.descriptor)
     }));
 
-    // Pass 1: Primary Detection (SSD MobileNet 0.45 & TinyFace 512 0.45)
-    console.log('[Face Detection Pipeline] Pass 1: Running primary SSD MobileNet (0.45) & TinyFace (512, 0.45)...');
-    let primaryDetections = [];
-    try {
-      primaryDetections = await faceapi
-        .detectAllFaces(inputElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.45 }))
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-    } catch (err) {
-      console.warn('[Face Detection Pipeline] Primary SSD MobileNet pass error:', err.message);
+    const scanSingleOrientation = async (targetElement) => {
+      // Pass 1: Primary Detection (SSD MobileNet 0.45 & TinyFace 512 0.45)
+      let primaryDetections = [];
+      try {
+        primaryDetections = await faceapi
+          .detectAllFaces(targetElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.45 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+      } catch (err) { }
+
+      let tinyDetections = [];
+      try {
+        tinyDetections = await faceapi
+          .detectAllFaces(targetElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.45 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+      } catch (err) { }
+
+      let merged = mergeFaceDetections(primaryDetections, tinyDetections);
+      let filtered = filterAndSanitizeDetections(merged);
+      if (filtered.length > 0) {
+        return formatResults(filtered);
+      }
+
+      // Pass 2: Fallback Pass (SSD MobileNet 0.35 & TinyFace 640 0.35)
+      let fallbackPrimary = [];
+      try {
+        fallbackPrimary = await faceapi
+          .detectAllFaces(targetElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+      } catch (err) { }
+
+      let fallbackTiny = [];
+      try {
+        fallbackTiny = await faceapi
+          .detectAllFaces(targetElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 640, scoreThreshold: 0.35 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+      } catch (err) { }
+
+      let fallbackMerged = mergeFaceDetections(fallbackPrimary, fallbackTiny);
+      let fallbackFiltered = filterAndSanitizeDetections(fallbackMerged);
+      if (fallbackFiltered.length > 0) {
+        return formatResults(fallbackFiltered);
+      }
+
+      // Pass 3: Sensitive Pass (SSD MobileNet 0.15 & TinyFace 0.15)
+      let pass3Primary = [];
+      try {
+        pass3Primary = await faceapi
+          .detectAllFaces(targetElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.15 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+      } catch (err) { }
+
+      let pass3Tiny = [];
+      try {
+        pass3Tiny = await faceapi
+          .detectAllFaces(targetElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.15 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+      } catch (err) { }
+
+      let pass3Merged = mergeFaceDetections(pass3Primary, pass3Tiny);
+      let pass3Filtered = filterAndSanitizeDetections(pass3Merged);
+      if (pass3Filtered.length > 0) {
+        return formatResults(pass3Filtered);
+      }
+
+      return [];
+    };
+
+    // Rotation angles to evaluate if 0 deg pass yields no faces: 0, 90, 270, 180
+    const anglesToTry = [0, 90, 270, 180];
+    const currW = inputElement.width || inputElement.naturalWidth || 0;
+    const currH = inputElement.height || inputElement.naturalHeight || 0;
+
+    for (const angle of anglesToTry) {
+      let targetElement = inputElement;
+      let rotCanvas = null;
+
+      if (angle !== 0 && currW > 0 && currH > 0) {
+        rotCanvas = document.createElement('canvas');
+        if (angle === 90 || angle === 270) {
+          rotCanvas.width = currH;
+          rotCanvas.height = currW;
+        } else {
+          rotCanvas.width = currW;
+          rotCanvas.height = currH;
+        }
+        const ctx = rotCanvas.getContext('2d');
+        ctx.save();
+        ctx.translate(rotCanvas.width / 2, rotCanvas.height / 2);
+        ctx.rotate((angle * Math.PI) / 180);
+        ctx.drawImage(inputElement, -currW / 2, -currH / 2);
+        ctx.restore();
+        targetElement = rotCanvas;
+      }
+
+      let results = await scanSingleOrientation(targetElement);
+
+      if (rotCanvas) {
+        try {
+          const ctx = rotCanvas.getContext('2d');
+          if (ctx) ctx.clearRect(0, 0, rotCanvas.width, rotCanvas.height);
+          rotCanvas.width = 0;
+          rotCanvas.height = 0;
+        } catch (e) { }
+      }
+
+      if (results && results.length > 0) {
+        if (angle !== 0) {
+          console.log(`[Face Detection Pipeline] Face identified at rotation angle ${angle}°. Mapping bounding boxes to canvas space...`);
+          results = results.map(item => ({
+            box: mapBoxToOriginal(item.box, angle, currW, currH),
+            descriptor: item.descriptor
+          }));
+        }
+        return results;
+      }
     }
 
-    let tinyDetections = [];
-    try {
-      tinyDetections = await faceapi
-        .detectAllFaces(inputElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.45 }))
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-    } catch (err) {
-      console.warn('[Face Detection Pipeline] TinyFaceDetector 512 pass error:', err.message);
-    }
-
-    let merged = mergeFaceDetections(primaryDetections, tinyDetections);
-    let filtered = filterAndSanitizeDetections(merged);
-    if (filtered.length > 0) {
-      console.log(`[Face Detection Pipeline] Pass 1 succeeded. Identified ${filtered.length} face(s).`);
-      return formatResults(filtered);
-    }
-
-    // Pass 2: Fallback Pass (SSD MobileNet 0.35 & TinyFace 640 0.35)
-    console.log('[Face Detection Pipeline] Pass 2 (Fallback): Trying secondary SSD MobileNet (0.35) & TinyFace (640, 0.35)...');
-    let fallbackPrimary = [];
-    try {
-      fallbackPrimary = await faceapi
-        .detectAllFaces(inputElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 }))
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-    } catch (err) {
-      console.warn('[Face Detection Pipeline] Pass 2 SSD MobileNet error:', err.message);
-    }
-
-    let fallbackTiny = [];
-    try {
-      fallbackTiny = await faceapi
-        .detectAllFaces(inputElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 640, scoreThreshold: 0.35 }))
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-    } catch (err) {
-      console.warn('[Face Detection Pipeline] Pass 2 TinyFaceDetector error:', err.message);
-    }
-
-    let fallbackMerged = mergeFaceDetections(fallbackPrimary, fallbackTiny);
-    let fallbackFiltered = filterAndSanitizeDetections(fallbackMerged);
-    if (fallbackFiltered.length > 0) {
-      console.log(`[Face Detection Pipeline] Pass 2 succeeded. Identified ${fallbackFiltered.length} face(s).`);
-      return formatResults(fallbackFiltered);
-    }
-
-    // Pass 3: Sensitive Pass (SSD MobileNet 0.15 & TinyFace 0.15)
-    console.log('[Face Detection Pipeline] Pass 3 (Sensitive): Trying SSD MobileNet (0.15) & TinyFace (416, 0.15)...');
-    let pass3Primary = [];
-    try {
-      pass3Primary = await faceapi
-        .detectAllFaces(inputElement, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.15 }))
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-    } catch (err) {}
-
-    let pass3Tiny = [];
-    try {
-      pass3Tiny = await faceapi
-        .detectAllFaces(inputElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.15 }))
-        .withFaceLandmarks()
-        .withFaceDescriptors();
-    } catch (err) {}
-
-    let pass3Merged = mergeFaceDetections(pass3Primary, pass3Tiny);
-    let pass3Filtered = filterAndSanitizeDetections(pass3Merged);
-    if (pass3Filtered.length > 0) {
-      console.log(`[Face Detection Pipeline] Pass 3 succeeded. Identified ${pass3Filtered.length} face(s).`);
-      return formatResults(pass3Filtered);
-    }
-
-    console.log('[Face Detection Pipeline] Detection completed. No faces found.');
+    console.log('[Face Detection Pipeline] Detection completed. No faces found across all orientation passes.');
     return [];
   }
 
@@ -464,30 +573,32 @@
     }
 
     let descriptors = [];
-    if (canvas) {
-      try {
-        descriptors = await detectFacesMultiScale(canvas);
-      } catch (err) {
-        console.warn('[Face Detection Pipeline] Browser face detection exception, falling back to server-side detection:', err.message);
-        descriptors = [];
-      } finally {
+    try {
+      // Ensure all asynchronous image loading and decoding completes before face detection starts
+      const inputTarget = canvas || (await loadImageElement(resizedFile));
+      descriptors = await detectFacesMultiScale(inputTarget);
+    } catch (err) {
+      console.warn('[Face Detection Pipeline] Browser face detection exception, falling back to server-side detection:', err.message);
+      descriptors = [];
+    } finally {
+      if (canvas) {
         try {
           const ctx = canvas.getContext('2d');
           if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
           canvas.width = 0;
           canvas.height = 0;
-        } catch (e) {}
+        } catch (e) { }
       }
     }
 
-    const faceDetected = descriptors.length > 0;
+    const faceDetected = Array.isArray(descriptors) && descriptors.length > 0;
     const faceStatus = faceDetected
       ? `${descriptors.length} face(s) identified`
       : 'No Face Detected (Server fallback will scan on upload)';
 
     return {
       resizedFile,
-      descriptors,
+      descriptors: Array.isArray(descriptors) ? descriptors : [],
       faceDetected,
       faceStatus
     };
@@ -502,9 +613,9 @@
       this.maxQueueSize = options.maxQueueSize || 15;
       this.maxRetries = options.maxRetries || 3;
       this.isPublic = options.isPublic !== undefined ? options.isPublic : true;
-      this.onItemChange = options.onItemChange || (() => {});
-      this.onProgress = options.onProgress || (() => {});
-      this.onComplete = options.onComplete || (() => {});
+      this.onItemChange = options.onItemChange || (() => { });
+      this.onProgress = options.onProgress || (() => { });
+      this.onComplete = options.onComplete || (() => { });
 
       this.queue = [];
       this.activeCount = 0;
@@ -539,7 +650,7 @@
 
         try {
           item.objectUrl = URL.createObjectURL(file);
-        } catch (e) {}
+        } catch (e) { }
 
         this.queue.push(item);
         addedItems.push(item);
@@ -554,7 +665,7 @@
       if (idx > -1) {
         const item = this.queue[idx];
         if (item.objectUrl) {
-          try { URL.revokeObjectURL(item.objectUrl); } catch (e) {}
+          try { URL.revokeObjectURL(item.objectUrl); } catch (e) { }
         }
         this.queue.splice(idx, 1);
         this.onItemChange(item, 'removed');
@@ -565,7 +676,7 @@
     clear() {
       this.queue.forEach(item => {
         if (item.objectUrl) {
-          try { URL.revokeObjectURL(item.objectUrl); } catch (e) {}
+          try { URL.revokeObjectURL(item.objectUrl); } catch (e) { }
         }
       });
       this.queue = [];

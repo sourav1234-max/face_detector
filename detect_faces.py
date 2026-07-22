@@ -71,93 +71,109 @@ def main():
         return
 
     try:
-        with Image.open(img_path) as img:
-            # 1. Correct EXIF orientation
-            img = ImageOps.exif_transpose(img)
-            if img.mode != "RGB":
-                img = img.convert("RGB")
+        img = Image.open(img_path)
+        # 1. Correct EXIF orientation
+        img = ImageOps.exif_transpose(img)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
 
-            orig_width, orig_height = img.size
+        # =========================================================================
+        # FEATURE: Vertical (Portrait) Orientation Standardization
+        # -------------------------------------------------------------------------
+        # If the EXIF-corrected image is horizontal (landscape: width > height),
+        # rotate 90° clockwise to make it vertical (portrait) before face detection.
+        # =========================================================================
+        if img.width > img.height:
+            img = img.rotate(-90, expand=True)
 
-            # 2. Resize generously to preserve detail for high-res images
-            max_size = 1600
-            resized = False
-            if orig_width > max_size or orig_height > max_size:
-                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-                resized = True
+        # Save the vertical image back to disk so the stored photo is vertical
+        img.load()
+        try:
+            img.save(img_path, format="JPEG", quality=95)
+        except Exception:
+            pass
 
-            resized_width, resized_height = img.size
-            base_image_np = np.array(img)
+        orig_width, orig_height = img.size
 
-            # Determine detection passes
-            max_dim = max(resized_width, resized_height)
-            models_to_try = [
-                ("hog", {"number_of_times_to_upsample": 1}),
-                ("hog", {"number_of_times_to_upsample": 2}),
-                ("hog", {"number_of_times_to_upsample": 0}),
-            ]
-            if max_dim < 1200:
-                models_to_try.append(("cnn", {}))
+        # 2. Resize generously to preserve detail for high-res images
+        max_size = 1600
+        resized = False
+        if orig_width > max_size or orig_height > max_size:
+            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            resized = True
 
-            found_faces = []
-            last_error = None
+        resized_width, resized_height = img.size
+        base_image_np = np.array(img)
 
-            # Rotation angles to evaluate: 0 (default upright), then 90, 270, 180 fallback
-            angles_to_try = [0, 90, 270, 180]
+        # Determine detection passes
+        max_dim = max(resized_width, resized_height)
+        models_to_try = [
+            ("hog", {"number_of_times_to_upsample": 1}),
+            ("hog", {"number_of_times_to_upsample": 2}),
+            ("hog", {"number_of_times_to_upsample": 0}),
+        ]
+        if max_dim < 1200:
+            models_to_try.append(("cnn", {}))
 
-            for angle in angles_to_try:
-                curr_np = rotate_image_np(base_image_np, angle)
-                
-                for model_name, kwargs in models_to_try:
-                    try:
-                        current_locations = face_recognition.face_locations(curr_np, model=model_name, **kwargs)
-                        if current_locations:
-                            current_encodings = face_recognition.face_encodings(curr_np, current_locations)
-                            
-                            # Map locations back to unrotated resized space
-                            for loc, enc in zip(current_locations, current_encodings):
-                                orig_loc = map_box_to_original(loc, angle, resized_width, resized_height)
-                                found_faces.append((orig_loc, enc))
-                            break
-                    except Exception as exc:
-                        last_error = str(exc)
+        found_faces = []
+        last_error = None
 
-                if found_faces:
-                    break
+        # Rotation angles to evaluate: 0 (default upright), then 90, 270, 180 fallback
+        angles_to_try = [0, 90, 270, 180]
 
-            if not found_faces and last_error is not None:
-                print(json.dumps({"success": False, "error": f"Face detection models failed: {last_error}"}))
-                return
+        for angle in angles_to_try:
+            curr_np = rotate_image_np(base_image_np, angle)
+            
+            for model_name, kwargs in models_to_try:
+                try:
+                    current_locations = face_recognition.face_locations(curr_np, model=model_name, **kwargs)
+                    if current_locations:
+                        current_encodings = face_recognition.face_encodings(curr_np, current_locations)
+                        
+                        # Map locations back to unrotated resized space
+                        for loc, enc in zip(current_locations, current_encodings):
+                            orig_loc = map_box_to_original(loc, angle, resized_width, resized_height)
+                            found_faces.append((orig_loc, enc))
+                        break
+                except Exception as exc:
+                    last_error = str(exc)
 
-            scale_x = orig_width / resized_width if resized else 1.0
-            scale_y = orig_height / resized_height if resized else 1.0
+            if found_faces:
+                break
 
-            faces = []
-            for (top, right, bottom, left), encoding in found_faces:
-                orig_left = int(left * scale_x)
-                orig_top = int(top * scale_y)
-                orig_right = int(right * scale_x)
-                orig_bottom = int(bottom * scale_y)
-                width = orig_right - orig_left
-                height = orig_bottom - orig_top
+        if not found_faces and last_error is not None:
+            print(json.dumps({"success": False, "error": f"Face detection models failed: {last_error}"}))
+            return
 
-                if width < 15 or height < 15:
-                    continue
+        scale_x = orig_width / resized_width if resized else 1.0
+        scale_y = orig_height / resized_height if resized else 1.0
 
-                box = {
-                    "x": orig_left,
-                    "y": orig_top,
-                    "width": width,
-                    "height": height,
-                }
+        faces = []
+        for (top, right, bottom, left), encoding in found_faces:
+            orig_left = int(left * scale_x)
+            orig_top = int(top * scale_y)
+            orig_right = int(right * scale_x)
+            orig_bottom = int(bottom * scale_y)
+            width = orig_right - orig_left
+            height = orig_bottom - orig_top
 
-                faces.append({
-                    "box": box,
-                    "descriptor": list(encoding),
-                })
+            if width < 15 or height < 15:
+                continue
 
-            faces = faces[:15]
-            print(json.dumps({"success": True, "faces": faces}))
+            box = {
+                "x": orig_left,
+                "y": orig_top,
+                "width": width,
+                "height": height,
+            }
+
+            faces.append({
+                "box": box,
+                "descriptor": list(encoding),
+            })
+
+        faces = faces[:15]
+        print(json.dumps({"success": True, "faces": faces}))
     except Exception as e:
         print(json.dumps({"success": False, "error": str(e)}))
 
