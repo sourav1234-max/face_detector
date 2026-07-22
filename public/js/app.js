@@ -5,7 +5,9 @@
 // Global state variables
 window.galleryCatalog = [];
 window.allEvents = [];
-window.selectedEventId = localStorage.getItem('public_active_event_id') || 'all';
+let savedPublicEventId = localStorage.getItem('public_active_event_id');
+if (savedPublicEventId === 'all') savedPublicEventId = '';
+window.selectedEventId = savedPublicEventId || '';
 window.uploadQueue = [];
 window.queryDescriptor = null;
 window.searchQueryDescriptor = null;
@@ -104,13 +106,11 @@ async function fetchGallery() {
     const result = await response.json();
 
     if (result.success) {
-      if (!window.defaultEventApplied && result.defaultPublicEventId) {
-        window.defaultEventApplied = true;
-        const savedPref = localStorage.getItem('public_active_event_id');
-        if (!savedPref && result.defaultPublicEventId !== 'all' && window.selectedEventId !== result.defaultPublicEventId) {
-          window.selectedEventId = result.defaultPublicEventId;
-          fetchGallery();
-          return;
+      window.allEvents = result.events || [];
+      if (window.allEvents.length > 0) {
+        if (!window.selectedEventId || window.selectedEventId === 'all' || !window.allEvents.some(e => e.id === window.selectedEventId)) {
+          window.selectedEventId = result.defaultPublicEventId || window.allEvents[0].id;
+          try { localStorage.setItem('public_active_event_id', window.selectedEventId); } catch (e) {}
         }
       }
 
@@ -120,7 +120,6 @@ async function fetchGallery() {
       }
 
       window.galleryCatalog = result.photos;
-      window.allEvents = result.events || [];
       window.publicGalleryEnabled = result.publicGalleryEnabled !== false;
       window.galleryHeading = result.galleryHeading || 'Gallery Catalog';
       window.allowPublicFaceAdjustment = result.allowPublicFaceAdjustment !== false;
@@ -1625,7 +1624,7 @@ function renderPublicEventFilterPills() {
   if (!container) return;
 
   const events = window.allEvents || [];
-  let html = `<button class="filter-pill ${(!window.selectedEventId || window.selectedEventId === 'all') ? 'active' : ''}" onclick="selectPublicEvent('all')">All Events</button>`;
+  let html = '';
   
   events.forEach(evt => {
     const isSelected = window.selectedEventId === evt.id;
@@ -1637,8 +1636,13 @@ function renderPublicEventFilterPills() {
 
 // --- Public Event Logic ---
 window.selectPublicEvent = function(eventId) {
-  if (eventId && eventId !== 'all') {
-    const evt = (window.allEvents || []).find(e => e.id === eventId);
+  const events = window.allEvents || [];
+  if (!eventId || eventId === 'all' || !events.some(e => e.id === eventId)) {
+    eventId = events[0]?.id || '';
+  }
+
+  if (eventId) {
+    const evt = events.find(e => e.id === eventId);
     if (evt && (evt.hasPasscode || evt.passcode)) {
       const unlocked = getUnlockedEventPasscode(eventId);
       if (!unlocked) {
@@ -1648,7 +1652,7 @@ window.selectPublicEvent = function(eventId) {
     }
   }
 
-  window.selectedEventId = eventId || 'all';
+  window.selectedEventId = eventId;
   try {
     localStorage.setItem('public_active_event_id', window.selectedEventId);
   } catch (e) {}
@@ -1734,12 +1738,20 @@ function setupRightClickProtection() {
 
 function populatePublicEventDropdowns() {
   const globalPicker = document.getElementById('global-event-picker');
+  const events = window.allEvents || [];
 
-  const eventOptions = (window.allEvents || []).map(evt => `<option value="${evt.id}">🎉 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
+  if (events.length > 0) {
+    if (!window.selectedEventId || window.selectedEventId === 'all' || !events.some(e => e.id === window.selectedEventId)) {
+      window.selectedEventId = events[0].id;
+      try { localStorage.setItem('public_active_event_id', window.selectedEventId); } catch (e) {}
+    }
+  }
+
+  const eventOptions = events.map(evt => `<option value="${evt.id}">🎉 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
 
   if (globalPicker) {
-    globalPicker.innerHTML = `<option value="all">🎉 All Photos / All Events (Combined Catalog)</option>` + eventOptions;
-    globalPicker.value = window.selectedEventId || 'all';
+    globalPicker.innerHTML = eventOptions;
+    globalPicker.value = window.selectedEventId || '';
 
     if (!globalPicker.dataset.listenerAttached) {
       globalPicker.dataset.listenerAttached = 'true';
@@ -1749,6 +1761,7 @@ function populatePublicEventDropdowns() {
     }
   }
 
+  renderPublicEventFilterPills();
   updateUploadEventIndicator();
 }
 
@@ -1811,10 +1824,11 @@ function setupEventPasscodeModal() {
   if (cancelBtn) {
     cancelBtn.addEventListener('click', () => {
       closeEventPasscodeModal();
-      window.selectedEventId = 'all';
-      try { localStorage.setItem('public_active_event_id', 'all'); } catch (e) {}
+      const fallbackId = (window.allEvents || [])[0]?.id || '';
+      window.selectedEventId = fallbackId;
+      try { localStorage.setItem('public_active_event_id', fallbackId); } catch (e) {}
       const globalPicker = document.getElementById('global-event-picker');
-      if (globalPicker) globalPicker.value = 'all';
+      if (globalPicker) globalPicker.value = fallbackId;
       fetchGallery();
     });
   }

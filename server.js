@@ -810,6 +810,8 @@ app.get('/api/gallery', async (req, res) => {
     const settings = await readSettings();
     const galleryHeading = settings.publicGalleryHeading || 'Gallery Catalog';
     const events = await readEventsDb();
+    const isAdmin = await isValidAdminSession(req);
+
     let allEvt = events.find(e => e.id === 'all');
     if (!allEvt) {
       allEvt = {
@@ -825,15 +827,22 @@ app.get('/api/gallery', async (req, res) => {
         announcementMessage: settings.galleryMessage || '',
         isSystemEvent: true
       };
+    } else {
+      allEvt = { ...allEvt, isSystemEvent: true };
     }
 
-    const allEventsList = [allEvt, ...events.filter(e => e.id !== 'all')];
+    let availableEvents = [];
+    if (isAdmin) {
+      availableEvents = [allEvt, ...events.filter(e => e.id !== 'all')];
+    } else {
+      availableEvents = events.filter(e => e.id !== 'all' && e.showInPublicGallery !== false && e.status === 'active');
+    }
 
     if (!settings.publicGalleryEnabled) {
       return res.json({
         success: true,
         photos: [],
-        events: allEventsList.map(e => { const { passcode, ...rest } = e; return rest; }),
+        events: availableEvents.map(e => { const { passcode, ...rest } = e; return rest; }),
         publicGalleryEnabled: false,
         galleryHeading,
         logoWidth: settings.logoWidth,
@@ -842,15 +851,18 @@ app.get('/api/gallery', async (req, res) => {
       });
     }
 
+    const publicEventIds = new Set(events.filter(e => e.id !== 'all' && e.showInPublicGallery !== false).map(e => e.id));
     const gallery = await readGalleryDb();
     let publicPhotos = gallery.filter(photo => {
       const status = photo.status === undefined ? 'approved' : photo.status;
       const isPublic = photo.isPublic === undefined ? true : photo.isPublic;
-      return status === 'approved' && isPublic === true;
+      if (isAdmin) {
+        return status === 'approved';
+      }
+      return status === 'approved' && isPublic === true && publicEventIds.has(photo.eventId);
     });
 
-    const isAdmin = await isValidAdminSession(req);
-    const publicEvents = allEventsList.map(evt => {
+    const publicEvents = availableEvents.map(evt => {
       const item = {
         ...evt,
         hasPasscode: !!(evt.passcode && evt.passcode.trim())
@@ -859,8 +871,16 @@ app.get('/api/gallery', async (req, res) => {
       return item;
     });
 
-    const requestedEventId = req.query.eventId || 'all';
-    const targetEvent = allEventsList.find(e => e.id === requestedEventId) || allEvt;
+    let requestedEventId = req.query.eventId;
+    if (!isAdmin) {
+      if (!requestedEventId || requestedEventId === 'all' || !availableEvents.some(e => e.id === requestedEventId)) {
+        requestedEventId = availableEvents[0]?.id || '';
+      }
+    } else {
+      requestedEventId = requestedEventId || 'all';
+    }
+
+    const targetEvent = availableEvents.find(e => e.id === requestedEventId) || (isAdmin ? allEvt : availableEvents[0]);
 
     if (targetEvent && targetEvent.passcode && targetEvent.passcode.trim() && !isAdmin) {
       const providedPasscode = (req.headers['x-event-passcode'] || req.query.passcode || '').trim();
@@ -887,11 +907,11 @@ app.get('/api/gallery', async (req, res) => {
       events: publicEvents,
       publicGalleryEnabled: true,
       galleryHeading,
-      defaultPublicEventId: settings.defaultPublicEventId || 'all',
+      defaultPublicEventId: availableEvents[0]?.id || '',
       allowPublicFaceAdjustment: settings.allowPublicFaceAdjustment !== false,
       logoWidth: settings.logoWidth,
       storageMode: getStorageMode(settings),
-      galleryMessage: targetEvent.announcementMessage || settings.galleryMessage || ''
+      galleryMessage: (targetEvent && targetEvent.announcementMessage) || settings.galleryMessage || ''
     });
   } catch (err) {
     console.error('Gallery endpoint error:', err);
@@ -934,7 +954,10 @@ app.get('/api/events', async (req, res) => {
       }
     });
 
-    const userEvents = events.filter(e => e.id !== 'all');
+    const userEvents = isAdmin
+      ? events.filter(e => e.id !== 'all')
+      : events.filter(e => e.id !== 'all' && e.showInPublicGallery !== false && e.status === 'active');
+
     const eventsWithCount = userEvents.map(evt => {
       const item = {
         ...evt,
@@ -947,12 +970,15 @@ app.get('/api/events', async (req, res) => {
       return item;
     });
 
+    if (!isAdmin) {
+      return res.json({ success: true, events: eventsWithCount });
+    }
+
     const allItem = {
       ...allEvt,
       photoCount: gallery.length,
       hasPasscode: !!(allEvt.passcode && allEvt.passcode.trim())
     };
-    if (!isAdmin) delete allItem.passcode;
 
     res.json({ success: true, events: [allItem, ...eventsWithCount] });
   } catch (err) {
@@ -967,7 +993,7 @@ app.post('/api/events', async (req, res) => {
     if (!isAdmin) {
       return res.status(401).json({ success: false, error: 'Unauthorized access.' });
     }
-    const { title, name, description, date, coverUrl, status, passcode, allowDownload, disableRightClick, announcementMessage } = req.body;
+    const { title, name, description, date, coverUrl, status, passcode, allowDownload, disableRightClick, announcementMessage, showInPublicGallery } = req.body;
     const eventName = (name || title || '').trim();
     if (!eventName) {
       return res.status(400).json({ success: false, error: 'Event name is required.' });
@@ -984,6 +1010,7 @@ app.post('/api/events', async (req, res) => {
       passcode: (passcode || '').trim(),
       allowDownload: allowDownload !== undefined ? !!allowDownload : true,
       disableRightClick: disableRightClick !== undefined ? !!disableRightClick : false,
+      showInPublicGallery: showInPublicGallery !== undefined ? !!showInPublicGallery : true,
       announcementMessage: announcementMessage !== undefined ? announcementMessage.trim() : '',
       createdAt: new Date().toISOString()
     };
@@ -1003,7 +1030,7 @@ app.put('/api/events/:id', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Unauthorized access.' });
     }
     const { id } = req.params;
-    const { title, name, description, date, coverUrl, status, passcode, allowDownload, disableRightClick, announcementMessage } = req.body;
+    const { title, name, description, date, coverUrl, status, passcode, allowDownload, disableRightClick, announcementMessage, showInPublicGallery } = req.body;
     const patch = {};
     if (title !== undefined || name !== undefined) {
       const eventName = (name || title || '').trim();
@@ -1019,6 +1046,7 @@ app.put('/api/events/:id', async (req, res) => {
     if (passcode !== undefined) patch.passcode = (passcode || '').trim();
     if (allowDownload !== undefined) patch.allowDownload = !!allowDownload;
     if (disableRightClick !== undefined) patch.disableRightClick = !!disableRightClick;
+    if (showInPublicGallery !== undefined) patch.showInPublicGallery = !!showInPublicGallery;
     if (announcementMessage !== undefined) patch.announcementMessage = announcementMessage.trim();
 
     let updated = await updateEvent(id, patch);
@@ -1754,18 +1782,30 @@ app.post('/api/search', async (req, res) => {
     }
 
     const gallery = await readGalleryDb();
+    const events = await readEventsDb();
     const matches = [];
     const isAdmin = await isValidAdminSession(req);
+    const publicEventIds = new Set(events.filter(e => e.id !== 'all' && e.showInPublicGallery !== false).map(e => e.id));
+
     let approvedPhotos = gallery.filter(photo => {
       const status = photo.status === undefined ? 'approved' : photo.status;
       const isPublic = photo.isPublic === undefined ? true : photo.isPublic;
-      return isAdmin ? status === 'approved' : (status === 'approved' && isPublic === true);
+      if (isAdmin) {
+        return status === 'approved';
+      }
+      return status === 'approved' && isPublic === true && publicEventIds.has(photo.eventId);
     });
 
-    const eventId = req.body.eventId;
+    let eventId = req.body.eventId;
+    if (!isAdmin && (eventId === 'all' || !eventId)) {
+      eventId = undefined;
+    }
+
     if (eventId && eventId !== 'all') {
-      const events = await readEventsDb();
       const targetEvent = events.find(e => e.id === eventId);
+      if (!isAdmin && targetEvent && targetEvent.showInPublicGallery === false) {
+        return res.json({ success: true, matches: [] });
+      }
       if (targetEvent && targetEvent.passcode && targetEvent.passcode.trim() && !isAdmin) {
         const providedPasscode = (req.headers['x-event-passcode'] || req.body.eventPasscode || '').trim();
         if (providedPasscode !== targetEvent.passcode.trim()) {

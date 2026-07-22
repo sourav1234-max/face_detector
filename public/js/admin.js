@@ -1668,6 +1668,7 @@ function renderAdminEventsList() {
       <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:8px;">
         <strong style="font-size:13px; color:#fff;">${evt.title || evt.name}</strong>
         ${isAllSystem ? `<span class="badge" style="background:rgba(59,130,246,0.2); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); padding:1px 6px; font-size:10px; margin-left:6px;"><i class="fa-solid fa-globe"></i> Global Catalog</span>` : ''}
+        ${!isAllSystem ? (evt.showInPublicGallery !== false ? `<span class="badge" style="background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-eye"></i> Public Gallery: Visible</span>` : `<span class="badge" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-eye-slash"></i> Public Gallery: Hidden</span>`) : ''}
         ${(evt.passcode || evt.hasPasscode) ? `<span class="badge" style="background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); padding:1px 6px; font-size:10px; margin-left:6px;"><i class="fa-solid fa-lock"></i> ${evt.passcode ? 'Passcode: ' + evt.passcode : 'Passcode Protected'}</span>` : ''}
         ${evt.allowDownload === false ? `<span class="badge" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-ban"></i> No Downloads</span>` : ''}
         ${evt.disableRightClick ? `<span class="badge" style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-shield"></i> Protected</span>` : ''}
@@ -1768,6 +1769,7 @@ function setupEventManagement() {
     const descInput = document.getElementById('event-desc-input');
     const statusInput = document.getElementById('event-status-input');
     const passcodeInput = document.getElementById('event-passcode-input');
+    const showPublicCheck = document.getElementById('event-show-public-check');
     const allowDownloadCheck = document.getElementById('event-allow-download-check');
     const disableRightClickCheck = document.getElementById('event-disable-rightclick-check');
     const announcementInput = document.getElementById('event-announcement-input');
@@ -1786,6 +1788,7 @@ function setupEventManagement() {
           description: descInput ? descInput.value.trim() : '',
           status: statusInput ? statusInput.value : 'active',
           passcode: passcodeInput ? passcodeInput.value.trim() : '',
+          showInPublicGallery: showPublicCheck ? showPublicCheck.checked : true,
           allowDownload: allowDownloadCheck ? allowDownloadCheck.checked : true,
           disableRightClick: disableRightClickCheck ? disableRightClickCheck.checked : false,
           announcementMessage: announcementInput ? announcementInput.value.trim() : ''
@@ -1797,6 +1800,7 @@ function setupEventManagement() {
         if (dateInput) dateInput.value = '';
         if (descInput) descInput.value = '';
         if (passcodeInput) passcodeInput.value = '';
+        if (showPublicCheck) showPublicCheck.checked = true;
         if (allowDownloadCheck) allowDownloadCheck.checked = true;
         if (disableRightClickCheck) disableRightClickCheck.checked = false;
         if (announcementInput) announcementInput.value = '';
@@ -1830,6 +1834,7 @@ function setupEventManagement() {
             status: document.getElementById('edit-event-status').value,
             description: document.getElementById('edit-event-desc').value.trim(),
             passcode: document.getElementById('edit-event-passcode').value.trim(),
+            showInPublicGallery: document.getElementById('edit-event-show-public') ? document.getElementById('edit-event-show-public').checked : true,
             allowDownload: document.getElementById('edit-event-allow-download').checked,
             disableRightClick: document.getElementById('edit-event-disable-rightclick').checked,
             announcementMessage: document.getElementById('edit-event-announcement').value.trim()
@@ -1861,6 +1866,7 @@ window.openEditEventModal = function(id) {
   const statusEl = document.getElementById('edit-event-status');
   const descEl = document.getElementById('edit-event-desc');
   const passcodeEl = document.getElementById('edit-event-passcode');
+  const showPublicEl = document.getElementById('edit-event-show-public');
   const allowDlEl = document.getElementById('edit-event-allow-download');
   const blockRcEl = document.getElementById('edit-event-disable-rightclick');
   const announceEl = document.getElementById('edit-event-announcement');
@@ -1871,6 +1877,7 @@ window.openEditEventModal = function(id) {
   if (statusEl) statusEl.value = evt.status || 'active';
   if (descEl) descEl.value = evt.description || '';
   if (passcodeEl) passcodeEl.value = evt.passcode || '';
+  if (showPublicEl) showPublicEl.checked = evt.showInPublicGallery !== false;
   if (allowDlEl) allowDlEl.checked = evt.allowDownload !== false;
   if (blockRcEl) blockRcEl.checked = !!evt.disableRightClick;
   if (announceEl) announceEl.value = evt.announcementMessage || '';

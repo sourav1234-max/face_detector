@@ -549,7 +549,11 @@
                   <span>If set, <strong>public users must enter this passcode</strong> to view or upload photos in this event. Leave empty for open/public access.</span>
                 </div>
               </div>
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
+              <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-bottom:8px;">
+                <div style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:4px; border:1px solid var(--panel-border);">
+                  <input type="checkbox" id="event-show-public-check" checked style="accent-color:var(--primary); cursor:pointer;">
+                  <label for="event-show-public-check" style="font-size:11px; cursor:pointer; color:#fff;"><i class="fa-solid fa-eye"></i> Show in Public Gallery</label>
+                </div>
                 <div style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:4px; border:1px solid var(--panel-border);">
                   <input type="checkbox" id="event-allow-download-check" checked style="accent-color:var(--primary); cursor:pointer;">
                   <label for="event-allow-download-check" style="font-size:11px; cursor:pointer; color:#fff;"><i class="fa-solid fa-download"></i> Allow Download</label>
@@ -1125,6 +1129,12 @@
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+          <div style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: var(--border-radius-sm); border: 1px solid var(--panel-border); grid-column: span 2;">
+            <input type="checkbox" id="edit-event-show-public" style="width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer;" checked>
+            <label for="edit-event-show-public" style="font-size: 12px; cursor: pointer; color: #fff; user-select: none;">
+              <i class="fa-solid fa-eye" style="margin-right: 4px; color: var(--primary);"></i> Show Photos in Public Gallery
+            </label>
+          </div>
           <div style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: var(--border-radius-sm); border: 1px solid var(--panel-border);">
             <input type="checkbox" id="edit-event-allow-download" style="width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer;">
             <label for="edit-event-allow-download" style="font-size: 12px; cursor: pointer; color: #fff; user-select: none;">
