@@ -388,7 +388,10 @@
 
   <!-- EVENT PASSCODE UNLOCK MODAL -->
   <div id="event-passcode-modal" class="auth-overlay" style="display:none; z-index: 10005;">
-    <div class="auth-card" style="max-width: 380px;">
+    <div class="auth-card" style="max-width: 380px; position: relative;">
+      <button type="button" id="event-passcode-close-icon" style="position: absolute; top: 12px; right: 12px; background: rgba(255,255,255,0.05); border: 1px solid var(--panel-border); color: var(--text-secondary); cursor: pointer; font-size: 14px; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: var(--transition-smooth);" title="Cancel">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
       <div class="auth-icon" style="color: var(--warning);">
         <i class="fa-solid fa-lock"></i>
       </div>

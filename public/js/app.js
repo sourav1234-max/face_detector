@@ -5,8 +5,8 @@
 // Global state variables
 window.galleryCatalog = [];
 window.allEvents = [];
-let savedPublicEventId = localStorage.getItem('public_active_event_id');
-if (savedPublicEventId === 'all') savedPublicEventId = '';
+let userSwitched = sessionStorage.getItem('user_switched_event') === 'true';
+let savedPublicEventId = userSwitched ? localStorage.getItem('public_active_event_id') : '';
 window.selectedEventId = savedPublicEventId || '';
 window.uploadQueue = [];
 window.queryDescriptor = null;
@@ -91,14 +91,14 @@ async function initFaceApi() {
 async function fetchGallery() {
   try {
     const headers = {};
-    if (window.selectedEventId && window.selectedEventId !== 'all') {
+    if (window.selectedEventId) {
       const passcode = getUnlockedEventPasscode(window.selectedEventId);
       if (passcode) {
         headers['x-event-passcode'] = passcode;
       }
     }
 
-    const queryStr = (window.selectedEventId && window.selectedEventId !== 'all')
+    const queryStr = window.selectedEventId
       ? `?eventId=${encodeURIComponent(window.selectedEventId)}`
       : '';
 
@@ -107,11 +107,11 @@ async function fetchGallery() {
 
     if (result.success) {
       window.allEvents = result.events || [];
-      if (window.allEvents.length > 0) {
-        if (!window.selectedEventId || window.selectedEventId === 'all' || !window.allEvents.some(e => e.id === window.selectedEventId)) {
-          window.selectedEventId = result.defaultPublicEventId || window.allEvents[0].id;
-          try { localStorage.setItem('public_active_event_id', window.selectedEventId); } catch (e) {}
-        }
+      window.defaultPublicEventId = result.defaultPublicEventId || 'all';
+
+      if (!sessionStorage.getItem('user_switched_event') || !window.selectedEventId) {
+        window.selectedEventId = window.defaultPublicEventId;
+        try { localStorage.setItem('public_active_event_id', window.selectedEventId); } catch (e) {}
       }
 
       if (result.passcodeRequired) {
@@ -1209,7 +1209,7 @@ async function performSearch() {
   try {
     const searchHeaders = { 'Content-Type': 'application/json' };
     // Include passcode header if the selected event is passcode-protected
-    if (searchEventId !== 'all') {
+    if (searchEventId) {
       const passcode = getUnlockedEventPasscode(searchEventId);
       if (passcode) {
         searchHeaders['x-event-passcode'] = passcode;
@@ -1636,8 +1636,9 @@ function renderPublicEventFilterPills() {
 
 // --- Public Event Logic ---
 window.selectPublicEvent = function(eventId) {
+  sessionStorage.setItem('user_switched_event', 'true');
   const events = window.allEvents || [];
-  if (!eventId || eventId === 'all' || !events.some(e => e.id === eventId)) {
+  if (!eventId || (eventId !== 'all' && !events.some(e => e.id === eventId))) {
     eventId = events[0]?.id || '';
   }
 
@@ -1739,19 +1740,21 @@ function setupRightClickProtection() {
 function populatePublicEventDropdowns() {
   const globalPicker = document.getElementById('global-event-picker');
   const events = window.allEvents || [];
+  const defaultId = window.defaultPublicEventId || 'all';
 
-  if (events.length > 0) {
-    if (!window.selectedEventId || window.selectedEventId === 'all' || !events.some(e => e.id === window.selectedEventId)) {
-      window.selectedEventId = events[0].id;
-      try { localStorage.setItem('public_active_event_id', window.selectedEventId); } catch (e) {}
-    }
+  if (!window.selectedEventId) {
+    window.selectedEventId = defaultId;
   }
 
   const eventOptions = events.map(evt => `<option value="${evt.id}">🎉 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
 
   if (globalPicker) {
     globalPicker.innerHTML = eventOptions;
-    globalPicker.value = window.selectedEventId || '';
+    if (events.some(e => e.id === window.selectedEventId)) {
+      globalPicker.value = window.selectedEventId;
+    } else {
+      globalPicker.value = '';
+    }
 
     if (!globalPicker.dataset.listenerAttached) {
       globalPicker.dataset.listenerAttached = 'true';
@@ -1819,17 +1822,45 @@ function setupEventPasscodeModal() {
   const modal = document.getElementById('event-passcode-modal');
   const form = document.getElementById('event-passcode-form');
   const cancelBtn = document.getElementById('event-passcode-cancel-btn');
+  const closeIcon = document.getElementById('event-passcode-close-icon');
   const errorEl = document.getElementById('event-passcode-error');
 
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', () => {
-      closeEventPasscodeModal();
-      const fallbackId = (window.allEvents || [])[0]?.id || '';
-      window.selectedEventId = fallbackId;
-      try { localStorage.setItem('public_active_event_id', fallbackId); } catch (e) {}
+  const handleCancel = () => {
+    const targetLockedId = pendingEventIdToUnlock || window.selectedEventId;
+    closeEventPasscodeModal();
+
+    const events = window.allEvents || [];
+    const openEvent = events.find(e => {
+      if (e.id === targetLockedId) return false;
+      const passcode = e.passcode || '';
+      if (!passcode && !e.hasPasscode) return true;
+      return !!getUnlockedEventPasscode(e.id);
+    });
+
+    if (openEvent) {
+      window.selectedEventId = openEvent.id;
+      try { localStorage.setItem('public_active_event_id', openEvent.id); } catch (e) {}
       const globalPicker = document.getElementById('global-event-picker');
-      if (globalPicker) globalPicker.value = fallbackId;
+      if (globalPicker) globalPicker.value = openEvent.id;
       fetchGallery();
+    } else {
+      window.selectedEventId = '';
+      try { localStorage.setItem('public_active_event_id', ''); } catch (e) {}
+      const globalPicker = document.getElementById('global-event-picker');
+      if (globalPicker) globalPicker.value = '';
+      window.galleryCatalog = [];
+      updateGalleryUI();
+    }
+  };
+
+  if (cancelBtn) cancelBtn.addEventListener('click', handleCancel);
+  if (closeIcon) closeIcon.addEventListener('click', handleCancel);
+
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        handleCancel();
+      }
     });
   }
 

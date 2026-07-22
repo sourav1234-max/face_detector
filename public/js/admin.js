@@ -1668,7 +1668,7 @@ function renderAdminEventsList() {
       <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:8px;">
         <strong style="font-size:13px; color:#fff;">${evt.title || evt.name}</strong>
         ${isAllSystem ? `<span class="badge" style="background:rgba(59,130,246,0.2); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); padding:1px 6px; font-size:10px; margin-left:6px;"><i class="fa-solid fa-globe"></i> Global Catalog</span>` : ''}
-        ${!isAllSystem ? (evt.showInPublicGallery !== false ? `<span class="badge" style="background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-eye"></i> Public Gallery: Visible</span>` : `<span class="badge" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-eye-slash"></i> Public Gallery: Hidden</span>`) : ''}
+        ${evt.showInPublicGallery !== false ? `<span class="badge" style="background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-eye"></i> Public Gallery: Visible</span>` : `<span class="badge" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-eye-slash"></i> Public Gallery: Hidden</span>`}
         ${(evt.passcode || evt.hasPasscode) ? `<span class="badge" style="background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); padding:1px 6px; font-size:10px; margin-left:6px;"><i class="fa-solid fa-lock"></i> ${evt.passcode ? 'Passcode: ' + evt.passcode : 'Passcode Protected'}</span>` : ''}
         ${evt.allowDownload === false ? `<span class="badge" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-ban"></i> No Downloads</span>` : ''}
         ${evt.disableRightClick ? `<span class="badge" style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); padding:1px 6px; font-size:10px; margin-left:4px;"><i class="fa-solid fa-shield"></i> Protected</span>` : ''}
@@ -1740,7 +1740,9 @@ function populateAdminEventDropdowns() {
 
   const defaultSelect = document.getElementById('default-public-event-select');
   if (defaultSelect) {
-    defaultSelect.innerHTML = `<option value="all">🎉 All Photos / All Events (Default)</option>` +
+    const allEvt = (window.allEvents || []).find(e => e.id === 'all');
+    const isAllVisible = !allEvt || allEvt.showInPublicGallery !== false;
+    defaultSelect.innerHTML = `<option value="all">🎉 All Photos / All Events ${isAllVisible ? '(Public Catalog)' : '(Hidden in Public)'}</option>` +
       customEvents.map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
     defaultSelect.value = window.defaultPublicEventId || 'all';
   }
