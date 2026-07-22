@@ -768,6 +768,9 @@
 
           if (!response.ok) {
             const errRes = await response.json().catch(() => ({}));
+            if (response.status === 413) {
+              throw new Error(errRes.error || 'HTTP 413: Image payload is too large for server limits.');
+            }
             throw new Error(errRes.error || `HTTP ${response.status} Server Error`);
           }
 

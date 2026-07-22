@@ -48,7 +48,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Memory storage works on Vercel (no persistent local disk)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50 MB
+    fieldSize: 50 * 1024 * 1024  // 50 MB for form data text fields (e.g. descriptors JSON)
+  },
   fileFilter: (req, file, cb) => {
     const filetypes = /jpeg|jpg|png|webp/;
     const mimetype = filetypes.test(file.mimetype);
@@ -60,7 +63,10 @@ const upload = multer({
 
 const multerMemory = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }
+  limits: {
+    fileSize: 50 * 1024 * 1024,
+    fieldSize: 50 * 1024 * 1024
+  }
 });
 
 function normalizeHost(host) {
@@ -2305,6 +2311,13 @@ app.post('/api/admin/delete-all', checkAdminAuth, async (req, res) => {
 });
 
 app.use((err, req, res, next) => {
+  if (err && (err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FIELD_VALUE' || err.status === 413 || err.type === 'entity.too.large')) {
+    console.warn('[Express Limit] Payload or file size too large:', err.message || err.code);
+    return res.status(413).json({
+      success: false,
+      error: 'File or payload size too large. Maximum supported upload size is 30 MB (up to 50 MB server limit).'
+    });
+  }
   console.error('Express global error handler:', err);
   res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
 });
