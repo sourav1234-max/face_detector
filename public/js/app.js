@@ -169,6 +169,9 @@ async function resizeImageIfNeeded(file, maxDim = 2048) {
       console.warn('[Image Resizer] createOrientedCanvas failed:', e);
     }
   }
+  if (window.FaceDetectorUtils && typeof window.FaceDetectorUtils.resizeImageFallback === 'function') {
+    return window.FaceDetectorUtils.resizeImageFallback(file, maxDim);
+  }
   return file;
 }
 

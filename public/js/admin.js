@@ -20,7 +20,7 @@ const CDN_MODEL_PATH = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/
 let modelPath = LOCAL_MODEL_PATH;
 
 async function resizeImageIfNeeded(file, maxDim = 2048) {
-  if (!file || !(file instanceof File || file instanceof Blob) || !file.type || !file.type.startsWith('image/')) {
+  if (!file || !(file instanceof File || file instanceof Blob) || (file.type && !file.type.startsWith('image/'))) {
     return file;
   }
   if (window.FaceDetectorUtils && typeof window.FaceDetectorUtils.createOrientedCanvas === 'function') {
@@ -32,53 +32,55 @@ async function resizeImageIfNeeded(file, maxDim = 2048) {
     }
   }
 
+  if (window.FaceDetectorUtils && typeof window.FaceDetectorUtils.resizeImageFallback === 'function') {
+    return window.FaceDetectorUtils.resizeImageFallback(file, maxDim);
+  }
+
   return new Promise((resolve) => {
     const img = new Image();
-    const reader = new FileReader();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const width = img.naturalWidth || img.width;
+      const height = img.naturalHeight || img.height;
 
-    reader.onload = (e) => {
-      img.onload = () => {
-        const width = img.width;
-        const height = img.height;
+      if (width <= maxDim && height <= maxDim) {
+        return resolve(file);
+      }
 
-        if (width <= maxDim && height <= maxDim) {
-          return resolve(file);
+      let newWidth = width;
+      let newHeight = height;
+      if (width > height) {
+        if (width > maxDim) {
+          newHeight = Math.round((height * maxDim) / width);
+          newWidth = maxDim;
         }
-
-        let newWidth = width;
-        let newHeight = height;
-        if (width > height) {
-          if (width > maxDim) {
-            newHeight = Math.round((height * maxDim) / width);
-            newWidth = maxDim;
-          }
-        } else {
-          if (height > maxDim) {
-            newWidth = Math.round((width * maxDim) / height);
-            newHeight = maxDim;
-          }
+      } else {
+        if (height > maxDim) {
+          newWidth = Math.round((width * maxDim) / height);
+          newHeight = maxDim;
         }
+      }
 
-        const canvas = document.createElement('canvas');
-        canvas.width = newWidth;
-        canvas.height = newHeight;
-        const ctx = canvas.getContext('2d');
-        canvas.toBlob((blob) => {
-          if (!blob) {
-            return resolve(file);
-          }
-          const resizedFile = new File([blob], file.name, {
-            type: 'image/jpeg',
-            lastModified: Date.now()
-          });
-          resolve(resizedFile);
-        }, 'image/jpeg', 0.85);
-      };
-      img.onerror = () => resolve(file);
-      img.src = e.target.result;
+      const canvas = document.createElement('canvas');
+      canvas.width = newWidth;
+      canvas.height = newHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, newWidth, newHeight);
+      canvas.toBlob((blob) => {
+        if (!blob) return resolve(file);
+        const resizedFile = new File([blob], file.name, {
+          type: 'image/jpeg',
+          lastModified: Date.now()
+        });
+        resolve(resizedFile);
+      }, 'image/jpeg', 0.85);
     };
-    reader.onerror = () => resolve(file);
-    reader.readAsDataURL(file);
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+    img.src = objectUrl;
   });
 }
 

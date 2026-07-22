@@ -77,20 +77,29 @@
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('Could not load image element for face processing'));
 
       if (source instanceof File || source instanceof Blob) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          img.src = e.target.result;
+        const objectUrl = URL.createObjectURL(source);
+        img.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          resolve(img);
         };
-        reader.onerror = () => reject(new Error('Failed to read image source'));
-        reader.readAsDataURL(source);
+        img.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error('Could not load image element for face processing'));
+        };
+        img.src = objectUrl;
       } else if (typeof source === 'string') {
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('Could not load image element from URL'));
         img.src = source;
       } else if (source instanceof HTMLImageElement) {
-        resolve(source);
+        if (source.complete && source.naturalWidth !== 0) {
+          resolve(source);
+        } else {
+          source.onload = () => resolve(source);
+          source.onerror = () => reject(new Error('HTMLImageElement failed to load'));
+        }
       } else {
         reject(new Error('Invalid image source type'));
       }
@@ -555,6 +564,50 @@
   }
 
   /**
+   * Safe lightweight fallback resizer using ObjectURL and Canvas
+   */
+  async function resizeImageFallback(file, maxDim = 2048) {
+    if (!file || !(file instanceof File || file instanceof Blob) || (file.type && !file.type.startsWith('image/'))) {
+      return file;
+    }
+    return new Promise((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        
+        let nw = w;
+        let nh = h;
+        if (w > h) {
+          if (w > maxDim) { nh = Math.round((h * maxDim) / w); nw = maxDim; }
+        } else {
+          if (h > maxDim) { nw = Math.round((w * maxDim) / h); nh = maxDim; }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = nw;
+        canvas.height = nh;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, nw, nh);
+        canvas.toBlob((blob) => {
+          if (!blob) return resolve(file);
+          const baseName = (file.name || 'photo.jpg').replace(/\.[^/.]+$/, '');
+          const resized = new File([blob], `${baseName}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
+          console.log(`[Image Resizer Fallback] Reduced size from ${(file.size / 1024 / 1024).toFixed(2)} MB to ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+          resolve(resized);
+        }, 'image/jpeg', 0.85);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(file);
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  /**
    * Process photo completely: Load image, fix EXIF orientation, resize, detect faces deterministically.
    * @param {File|Blob} file 
    * @returns {Promise<{ resizedFile: File, descriptors: Array, faceDetected: boolean, faceStatus: string }>}
@@ -568,8 +621,14 @@
       canvas = oriented.canvas;
       resizedFile = oriented.file;
     } catch (e) {
-      console.warn('[Image Processor] createOrientedCanvas fallback to original file:', e.message);
-      resizedFile = file;
+      console.warn('[Image Processor] createOrientedCanvas failed, using fallback resizer:', e.message);
+      resizedFile = await resizeImageFallback(file, 2048);
+    }
+
+    // Safety check: if file is still over 4 MB (e.g. uncompressed raw file fallback), compress it again
+    if (resizedFile && resizedFile.size > 4 * 1024 * 1024) {
+      console.log(`[Image Processor] Resized file is still ${ (resizedFile.size / 1024 / 1024).toFixed(2) } MB, applying aggressive compression...`);
+      resizedFile = await resizeImageFallback(resizedFile, 1600);
     }
 
     let descriptors = [];
@@ -977,6 +1036,7 @@
   window.FaceDetectorUtils = {
     getExifOrientation,
     createOrientedCanvas,
+    resizeImageFallback,
     loadFaceApiModels,
     detectFacesMultiScale,
     extractDescriptorForBox,
