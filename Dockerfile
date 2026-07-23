@@ -1,7 +1,7 @@
-FROM node:20-bullseye-slim
+FROM node:20-bookworm-slim
 
-# Install Python and dependencies required by MediaPipe, OpenCV, and Pillow
-RUN apt-get update \
+# Install Python 3 and system libraries for MediaPipe, OpenCV, and Pillow
+RUN apt-get update --fix-missing \
   && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
@@ -17,7 +17,7 @@ RUN apt-get update \
 WORKDIR /usr/src/app
 
 COPY package.json package-lock.json ./
-RUN npm install
+RUN npm ci || npm install
 
 COPY requirements.txt ./
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
