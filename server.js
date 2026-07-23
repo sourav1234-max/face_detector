@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -8,6 +9,7 @@ const { google } = require('googleapis');
 const { execFile } = require('child_process');
 const {
   isFirebaseEnabled,
+  initRamCache,
   readGalleryDb,
   writeGalleryDb,
   addPhoto,
@@ -39,8 +41,22 @@ if (isFirebaseEnabled()) {
   console.warn('[Startup] Firebase is not enabled. Firestore metadata storage will not be available.');
 }
 
+// Trigger initial single-load RAM cache population from Firestore
+initRamCache().catch(err => {
+  console.error('[Startup Error] RAM Cache initialization failed:', err.message);
+});
+
 validateEnvironment();
 app.set('trust proxy', true);
+
+// Configure CORS for cross-origin requests between Vercel frontend and Railway backend
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-event-passcode', 'X-Requested-With']
+}));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
