@@ -938,6 +938,44 @@
             </div>
           </div>
 
+          <!-- Firebase Operations & RAM Cache Performance Card -->
+          <div class="dash-card" style="margin: 18px 0; background: linear-gradient(135deg, rgba(139,92,246,0.08), rgba(59,130,246,0.05)); border: 1px solid rgba(139,92,246,0.25);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+              <div>
+                <div class="dash-card-title" style="font-size:15px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
+                  <i class="fa-solid fa-fire-flame-curved" style="color:#f97316;"></i> Firebase Operations & RAM Cache Tracker
+                </div>
+                <div class="dash-card-sub" style="font-size:12px; color:#94a3b8;">Real-time tracking of Firestore reads, writes, deletes, and RAM cache saved operations</div>
+              </div>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-metrics" title="Refresh metrics" style="padding:6px 12px; font-size:12px;">
+                <i class="fa-solid fa-rotate-right"></i> Refresh Stats
+              </button>
+            </div>
+
+            <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); margin-bottom:0;">
+              <div class="stat-card" style="background:rgba(59,130,246,0.08); border-color:rgba(59,130,246,0.2);">
+                <div class="stat-val" id="metric-firestore-reads" style="color:#60a5fa;">0</div>
+                <span class="stat-label" style="color:#93c5fd;"><i class="fa-solid fa-book-open"></i> Firestore Reads</span>
+              </div>
+              <div class="stat-card" style="background:rgba(168,85,247,0.08); border-color:rgba(168,85,247,0.2);">
+                <div class="stat-val" id="metric-firestore-writes" style="color:#c084fc;">0</div>
+                <span class="stat-label" style="color:#e9d5ff;"><i class="fa-solid fa-pen-to-square"></i> Firestore Writes</span>
+              </div>
+              <div class="stat-card" style="background:rgba(239,68,68,0.08); border-color:rgba(239,68,68,0.2);">
+                <div class="stat-val" id="metric-firestore-deletes" style="color:#f87171;">0</div>
+                <span class="stat-label" style="color:#fca5a5;"><i class="fa-solid fa-trash-can"></i> Firestore Deletes</span>
+              </div>
+              <div class="stat-card" style="background:rgba(16,185,129,0.08); border-color:rgba(16,185,129,0.2);">
+                <div class="stat-val" id="metric-ram-saved-reads" style="color:#34d399;">0</div>
+                <span class="stat-label" style="color:#a7f3d0;"><i class="fa-solid fa-bolt"></i> Saved Reads (RAM)</span>
+              </div>
+              <div class="stat-card" style="background:rgba(245,158,11,0.08); border-color:rgba(245,158,11,0.2);">
+                <div class="stat-val" id="metric-cache-efficiency" style="color:#fbbf24;">100%</div>
+                <span class="stat-label" style="color:#fde68a;"><i class="fa-solid fa-gauge-high"></i> RAM Efficiency</span>
+              </div>
+            </div>
+          </div>
+
           <!-- Quick Nav Cards -->
           <div style="display:grid; grid-template-columns: repeat(auto-fill,minmax(200px,1fr)); gap:14px;">
             <div class="dash-card" style="cursor:pointer;" onclick="navigateTo('moderation')">

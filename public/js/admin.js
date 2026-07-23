@@ -1,4 +1,4 @@
-﻿// ==========================================================================
+// ==========================================================================
 // FaceMatch AI - Admin Dashboard Logic v2.0
 // ==========================================================================
 
@@ -295,6 +295,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadDashboardData();
     toastInfo('Refreshing', 'Reloading dashboard data...');
   });
+
+  const refreshMetricsBtn = document.getElementById('btn-refresh-metrics');
+  if (refreshMetricsBtn) {
+    refreshMetricsBtn.addEventListener('click', () => {
+      fetchFirebaseMetrics();
+      toastInfo('Metrics Updated', 'Refreshed Firestore operations and RAM cache stats.');
+    });
+  }
+
   document.getElementById('admin-logout-btn').addEventListener('click', logoutAdmin);
 
   // Check URL parameters for successful Google Drive OAuth connection
@@ -530,8 +539,33 @@ async function loadDashboardData() {
     if (galleryMsgInput && settingsRes && settingsRes.settings) {
       galleryMsgInput.value = settingsRes.settings.galleryMessage || '';
     }
+
+    // 4. Fetch Firebase Operational Metrics & RAM Cache Stats
+    await fetchFirebaseMetrics();
   } catch (err) {
     console.error("Failed to load dashboard data:", err);
+  }
+}
+
+async function fetchFirebaseMetrics() {
+  try {
+    const res = await adminFetch('/api/admin/metrics');
+    if (res && res.success && res.metrics) {
+      const m = res.metrics;
+      const readsEl = document.getElementById('metric-firestore-reads');
+      const writesEl = document.getElementById('metric-firestore-writes');
+      const deletesEl = document.getElementById('metric-firestore-deletes');
+      const ramSavedEl = document.getElementById('metric-ram-saved-reads');
+      const effEl = document.getElementById('metric-cache-efficiency');
+
+      if (readsEl) readsEl.textContent = Number(m.firestoreReads || 0).toLocaleString();
+      if (writesEl) writesEl.textContent = Number(m.firestoreWrites || 0).toLocaleString();
+      if (deletesEl) deletesEl.textContent = Number(m.firestoreDeletes || 0).toLocaleString();
+      if (ramSavedEl) ramSavedEl.textContent = Number(m.ramCacheHits || 0).toLocaleString();
+      if (effEl) effEl.textContent = m.efficiency || '100%';
+    }
+  } catch (err) {
+    console.warn("Could not load Firebase metrics:", err.message);
   }
 }
 

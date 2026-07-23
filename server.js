@@ -10,6 +10,7 @@ const { execFile } = require('child_process');
 const {
   isFirebaseEnabled,
   initRamCache,
+  getMetrics,
   readGalleryDb,
   writeGalleryDb,
   addPhoto,
@@ -2132,6 +2133,15 @@ app.get('/api/admin/session-check', async (req, res) => {
 app.post('/api/admin/logout', (req, res) => {
   clearAdminSessionCookie(res);
   res.json({ success: true });
+});
+
+app.get('/api/admin/metrics', checkAdminAuth, async (req, res) => {
+  try {
+    const metricsData = getMetrics();
+    res.json({ success: true, metrics: metricsData });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get('/api/admin/settings', checkAdminAuth, async (req, res) => {
