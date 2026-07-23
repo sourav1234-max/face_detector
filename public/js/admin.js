@@ -1,5 +1,5 @@
-// ==========================================================================
-// FaceMatch AI - Admin Dashboard Logic
+﻿// ==========================================================================
+// FaceMatch AI - Admin Dashboard Logic v2.0
 // ==========================================================================
 
 // Global state variables
@@ -18,6 +18,130 @@ let adminModCurrentPage = 0;
 const LOCAL_MODEL_PATH = '/models';
 const CDN_MODEL_PATH = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 let modelPath = LOCAL_MODEL_PATH;
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// TOAST NOTIFICATION SYSTEM
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const TOAST_ICONS = {
+  success: 'fa-circle-check',
+  error:   'fa-circle-xmark',
+  warning: 'fa-triangle-exclamation',
+  info:    'fa-circle-info'
+};
+
+function showToast(type, title, message, durationMs = 4500) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
+    <i class="fa-solid ${TOAST_ICONS[type] || TOAST_ICONS.info} toast-icon"></i>
+    <div class="toast-body">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-msg">${message}</div>` : ''}
+    </div>
+  `;
+
+  const dismiss = () => {
+    toast.classList.add('removing');
+    setTimeout(() => toast.remove(), 270);
+  };
+  toast.addEventListener('click', dismiss);
+  container.appendChild(toast);
+  setTimeout(dismiss, durationMs);
+}
+
+// Convenience helpers
+const toastSuccess = (title, msg, ms) => showToast('success', title, msg, ms);
+const toastError   = (title, msg, ms) => showToast('error', title, msg, ms);
+const toastWarning = (title, msg, ms) => showToast('warning', title, msg, ms);
+const toastInfo    = (title, msg, ms) => showToast('info', title, msg, ms);
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// SIDEBAR NAVIGATION
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const SECTION_TITLES = {
+  overview:         'Overview',
+  moderation:       'Photo Moderation Queue',
+  upload:           'Direct Image Upload',
+  events:           'Event Management',
+  facedetection:    'Face Detection',
+  'gallery-settings': 'Gallery Settings',
+  storage:          'Storage & Drive',
+  branding:         'Branding',
+  security:         'Security'
+};
+
+window.navigateTo = function(sectionId) {
+  // Hide all sections
+  document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
+  // Show target section
+  const target = document.getElementById(`section-${sectionId}`);
+  if (target) target.classList.add('active');
+
+  // Update nav active state
+  document.querySelectorAll('.nav-item[data-section]').forEach(n => n.classList.remove('active'));
+  const navItem = document.getElementById(`nav-${sectionId}`);
+  if (navItem) navItem.classList.add('active');
+
+  // Update top bar title
+  const topbarTitle = document.getElementById('topbar-title');
+  if (topbarTitle) {
+    const label = SECTION_TITLES[sectionId] || sectionId;
+    topbarTitle.innerHTML = `<span>Admin</span> ${label}`;
+  }
+
+  // Close mobile sidebar if open
+  closeMobileSidebar();
+
+  // Scroll content to top
+  const content = document.querySelector('.admin-content');
+  if (content) content.scrollTop = 0;
+};
+
+function setupSidebarNav() {
+  // Nav item click handlers
+  document.querySelectorAll('.nav-item[data-section]').forEach(item => {
+    item.addEventListener('click', () => {
+      navigateTo(item.getAttribute('data-section'));
+    });
+  });
+
+  // Collapse toggle (desktop)
+  const collapseBtn = document.getElementById('sidebar-collapse-btn');
+  const sidebar = document.getElementById('admin-sidebar');
+  const mainArea = document.getElementById('admin-main');
+  if (collapseBtn && sidebar && mainArea) {
+    collapseBtn.addEventListener('click', () => {
+      const collapsed = sidebar.classList.toggle('collapsed');
+      mainArea.classList.toggle('collapsed', collapsed);
+      collapseBtn.innerHTML = collapsed
+        ? '<i class="fa-solid fa-angles-right"></i>'
+        : '<i class="fa-solid fa-angles-left"></i>';
+    });
+  }
+
+  // Mobile hamburger
+  const hamburger = document.getElementById('topbar-hamburger');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (hamburger) {
+    hamburger.addEventListener('click', () => {
+      if (sidebar) sidebar.classList.toggle('mobile-open');
+      if (overlay) overlay.classList.toggle('visible');
+    });
+  }
+  if (overlay) {
+    overlay.addEventListener('click', closeMobileSidebar);
+  }
+}
+
+function closeMobileSidebar() {
+  const sidebar = document.getElementById('admin-sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (sidebar) sidebar.classList.remove('mobile-open');
+  if (overlay) overlay.classList.remove('visible');
+}
 
 async function resizeImageIfNeeded(file, maxDim = 2048) {
   if (!file || !(file instanceof File || file instanceof Blob) || (file.type && !file.type.startsWith('image/'))) {
@@ -154,6 +278,7 @@ async function adminFetch(url, options = {}) {
 
 // --- Initialize Admin App ---
 document.addEventListener('DOMContentLoaded', async () => {
+  setupSidebarNav();
   setupAuthEvents();
   setupTabFilters();
   setupSettingsEvents();
@@ -166,24 +291,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Preload face-api models for face detection on upload
   loadFaceApiModels().catch(err => console.warn('Failed to preload face-api models:', err));
 
-  document.getElementById('refresh-moderation-btn').addEventListener('click', loadDashboardData);
+  document.getElementById('refresh-moderation-btn').addEventListener('click', () => {
+    loadDashboardData();
+    toastInfo('Refreshing', 'Reloading dashboard data...');
+  });
   document.getElementById('admin-logout-btn').addEventListener('click', logoutAdmin);
 
   // Check URL parameters for successful Google Drive OAuth connection
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('gdrive') === 'success') {
-    alert("Successfully authenticated with your Gmail account and connected to Google Drive!");
+    toastSuccess('Google Drive Connected', 'Successfully authenticated and connected to Google Drive!');
     window.history.replaceState({}, document.title, window.location.pathname);
     await loadDashboardData();
+    navigateTo('storage');
   } else if (urlParams.get('gdrive') === 'missing_scope') {
-    alert("Warning: Google account connected, but Google Drive file creation access was NOT granted. Please disconnect and reconnect, making sure to allow Google Drive file access.");
+    toastWarning('Missing Permissions', 'Google account connected, but Google Drive file creation access was NOT granted. Please disconnect and reconnect.');
     window.history.replaceState({}, document.title, window.location.pathname);
     await loadDashboardData();
+    navigateTo('storage');
   } else if (urlParams.get('gdrive') === 'error') {
     const msg = urlParams.get('msg') ? decodeURIComponent(urlParams.get('msg')) : 'Google OAuth connection failed. Please try again.';
-    alert(`Google Drive connection error: ${msg}`);
+    toastError('Google Drive Error', msg);
     window.history.replaceState({}, document.title, window.location.pathname);
     await loadDashboardData();
+    navigateTo('storage');
   }
 
   // Check if we are already logged in through a session cookie
@@ -278,10 +409,7 @@ function showAuthError(message) {
 async function logoutAdmin() {
   if (confirm("Are you sure you want to log out from the Admin Dashboard?")) {
     try {
-      await fetch('/api/admin/logout', {
-        method: 'POST',
-        credentials: 'same-origin'
-      });
+      await fetch('/api/admin/logout', { method: 'POST', credentials: 'same-origin' });
     } catch (err) {
       console.error("Logout error:", err);
     }
@@ -296,18 +424,28 @@ async function loadDashboardData() {
     const settingsRes = await adminFetch('/api/admin/settings');
     if (settingsRes.success) {
       window.defaultPublicEventId = settingsRes.settings.defaultPublicEventId || 'all';
-      document.getElementById('toggle-public-gallery-switch').checked = settingsRes.settings.publicGalleryEnabled;
+
+      // Public gallery toggles
+      const pubGallerySwitch = document.getElementById('toggle-public-gallery-switch');
+      if (pubGallerySwitch) pubGallerySwitch.checked = settingsRes.settings.publicGalleryEnabled;
       const faceAdjustSwitch = document.getElementById('toggle-public-face-adjustment-switch');
       if (faceAdjustSwitch) faceAdjustSwitch.checked = settingsRes.settings.allowPublicFaceAdjustment !== false;
+
+      // Face Detection toggle + status indicator
+      const fdEnabled = settingsRes.settings.faceDetectionEnabled !== false;
+      const fdSwitch = document.getElementById('toggle-face-detection-switch');
+      if (fdSwitch) fdSwitch.checked = fdEnabled;
+      updateFaceDetectionStatusUI(fdEnabled);
 
       // Update logo width slider
       const logoWidth = settingsRes.settings.logoWidth || 245;
       const widthSlider = document.getElementById('logo-width-slider');
       if (widthSlider) {
         widthSlider.value = logoWidth;
-        document.getElementById('logo-width-val').innerText = logoWidth + 'px';
+        const widthVal = document.getElementById('logo-width-val');
+        if (widthVal) widthVal.innerText = logoWidth + 'px';
       }
-      
+
       // Update photo retention input
       const retentionInput = document.getElementById('photo-retention-input');
       if (retentionInput) {
@@ -330,7 +468,7 @@ async function loadDashboardData() {
 
       if (statusBadge) {
         const isConnected = !!settingsRes.settings.googleDriveConnected;
-        
+
         if (clientIdInput) clientIdInput.value = settingsRes.settings.googleClientId || '';
         if (clientSecretInput) {
           if (settingsRes.settings.googleClientSecret === '********') {
@@ -349,11 +487,14 @@ async function loadDashboardData() {
         }
         if (copyRedirectBtn) {
           copyRedirectBtn.disabled = !settingsRes.googleRedirectUri;
-          copyRedirectBtn.addEventListener('click', () => {
+          // Remove old listeners before re-adding
+          const newCopyBtn = copyRedirectBtn.cloneNode(true);
+          copyRedirectBtn.parentNode.replaceChild(newCopyBtn, copyRedirectBtn);
+          newCopyBtn.addEventListener('click', () => {
             if (settingsRes.googleRedirectUri) {
               navigator.clipboard.writeText(settingsRes.googleRedirectUri)
-                .then(() => alert('Redirect URI copied to clipboard'))
-                .catch(() => alert('Failed to copy redirect URI'));
+                .then(() => toastSuccess('Copied!', 'Redirect URI copied to clipboard.'))
+                .catch(() => toastError('Copy Failed', 'Could not copy redirect URI to clipboard.'));
             }
           });
         }
@@ -364,11 +505,8 @@ async function loadDashboardData() {
           if (connectedContainer) connectedContainer.style.display = 'block';
           if (setupContainer) setupContainer.style.display = 'none';
           if (emailSpan) emailSpan.innerText = settingsRes.settings.googleConnectedEmail || 'Connected';
-          
           const hasDriveScope = settingsRes.settings.googleHasDriveScope !== false;
-          if (warningContainer) {
-            warningContainer.style.display = hasDriveScope ? 'none' : 'block';
-          }
+          if (warningContainer) warningContainer.style.display = hasDriveScope ? 'none' : 'block';
         } else {
           statusBadge.className = 'badge badge-pending';
           statusBadge.innerText = 'Not Connected';
@@ -394,6 +532,36 @@ async function loadDashboardData() {
     }
   } catch (err) {
     console.error("Failed to load dashboard data:", err);
+  }
+}
+
+// Update Face Detection status indicator UI
+function updateFaceDetectionStatusUI(enabled) {
+  const indicator = document.getElementById('fd-status-indicator');
+  const dot = document.getElementById('fd-dot');
+  const title = document.getElementById('fd-status-title');
+  const desc = document.getElementById('fd-status-desc');
+  const toggleDesc = document.getElementById('fd-toggle-desc');
+
+  if (indicator) {
+    indicator.className = `fd-status-indicator ${enabled ? 'enabled' : 'disabled'}`;
+  }
+  if (dot) {
+    dot.className = `fd-dot ${enabled ? '' : 'off'}`;
+  }
+  if (title) {
+    title.textContent = enabled ? 'Face Detection is Enabled' : 'Face Detection is Disabled';
+    title.style.color = enabled ? '#34d399' : '#f87171';
+  }
+  if (desc) {
+    desc.textContent = enabled
+      ? 'All uploaded images are processed through the full face detection pipeline.'
+      : 'Face detection is globally OFF. Uploads are stored without any face data.';
+  }
+  if (toggleDesc) {
+    toggleDesc.textContent = enabled
+      ? 'When enabled, all uploaded images go through face detection, landmark extraction, descriptor generation and metadata storage.'
+      : 'Face detection is currently disabled. Uploaded images will be stored with empty descriptors.';
   }
 }
 
@@ -763,38 +931,42 @@ window.deletePhotoPermanently = async function (id) {
 
 // --- Settings Operations ---
 function setupSettingsEvents() {
+  // â”€â”€ Public Gallery Toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const publicSwitch = document.getElementById('toggle-public-gallery-switch');
-  publicSwitch.addEventListener('change', async () => {
-    const enabled = publicSwitch.checked;
-    try {
-      const res = await adminFetch('/api/admin/settings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ publicGalleryEnabled: enabled })
-      });
-      if (!res.success) {
-        alert("Failed to save settings: " + res.error);
-        publicSwitch.checked = !enabled; // revert
+  if (publicSwitch) {
+    publicSwitch.addEventListener('change', async () => {
+      const enabled = publicSwitch.checked;
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ publicGalleryEnabled: enabled })
+        });
+        if (res.success) {
+          toastSuccess('Gallery Updated', `Public gallery browse is now ${enabled ? 'enabled' : 'disabled'}.`);
+        } else {
+          toastError('Save Failed', res.error);
+          publicSwitch.checked = !enabled;
+        }
+      } catch (err) {
+        publicSwitch.checked = !enabled;
       }
-    } catch (err) {
-      publicSwitch.checked = !enabled; // revert
-    }
-  });
+    });
+  }
 
+  // â”€â”€ Face Adjustment Toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const faceAdjustSwitch = document.getElementById('toggle-public-face-adjustment-switch');
   if (faceAdjustSwitch) {
     faceAdjustSwitch.addEventListener('change', async () => {
       const enabled = faceAdjustSwitch.checked;
       try {
         const res = await adminFetch('/api/admin/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ allowPublicFaceAdjustment: enabled })
         });
-        if (!res.success) {
-          alert("Failed to save face adjustment setting: " + res.error);
+        if (res.success) {
+          toastSuccess('Setting Saved', `Public face adjustment is now ${enabled ? 'enabled' : 'disabled'}.`);
+        } else {
+          toastError('Save Failed', res.error);
           faceAdjustSwitch.checked = !enabled;
         }
       } catch (err) {
@@ -803,211 +975,219 @@ function setupSettingsEvents() {
     });
   }
 
-  const passwordForm = document.getElementById('change-password-form');
-  passwordForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const newPass = document.getElementById('new-admin-password').value;
-    const confirmPass = document.getElementById('confirm-admin-password').value;
-
-    if (newPass.length < 6) {
-      alert("Password must be at least 6 characters long.");
-      return;
-    }
-
-    if (newPass !== confirmPass) {
-      alert("Passwords do not match. Please verify.");
-      return;
-    }
-
-    try {
-      const res = await adminFetch('/api/admin/settings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ newPassword: newPass })
-      });
-
-      if (res.success) {
-        alert("Admin password updated successfully! Please use the new password for future access.");
-        passwordForm.reset();
-      } else {
-        alert("Failed to update password: " + res.error);
+  // â”€â”€ Face Detection Global Toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const faceDetectionSwitch = document.getElementById('toggle-face-detection-switch');
+  if (faceDetectionSwitch) {
+    faceDetectionSwitch.addEventListener('change', async () => {
+      const enabled = faceDetectionSwitch.checked;
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ faceDetectionEnabled: enabled })
+        });
+        if (res.success) {
+          updateFaceDetectionStatusUI(enabled);
+          if (enabled) {
+            toastSuccess('Face Detection Enabled', 'All uploads will now be processed through the face detection pipeline.');
+          } else {
+            toastWarning('Face Detection Disabled', 'Uploads will be stored without face data until re-enabled.');
+          }
+        } else {
+          toastError('Save Failed', res.error);
+          faceDetectionSwitch.checked = !enabled;
+          updateFaceDetectionStatusUI(!enabled);
+        }
+      } catch (err) {
+        faceDetectionSwitch.checked = !enabled;
+        updateFaceDetectionStatusUI(!enabled);
       }
-    } catch (err) {
-      console.error("Change password request error:", err);
-    }
-  });
+    });
+  }
 
+  // â”€â”€ Change Password â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const passwordForm = document.getElementById('change-password-form');
+  if (passwordForm) {
+    passwordForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const newPass = document.getElementById('new-admin-password').value;
+      const confirmPass = document.getElementById('confirm-admin-password').value;
+
+      if (newPass.length < 6) {
+        toastError('Validation Error', 'Password must be at least 6 characters long.');
+        return;
+      }
+      if (newPass !== confirmPass) {
+        toastError('Validation Error', 'Passwords do not match. Please verify.');
+        return;
+      }
+
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newPassword: newPass })
+        });
+        if (res.success) {
+          toastSuccess('Password Updated', 'Admin password changed successfully. Use the new password next time you log in.');
+          passwordForm.reset();
+        } else {
+          toastError('Update Failed', res.error);
+        }
+      } catch (err) {
+        console.error('Change password request error:', err);
+      }
+    });
+  }
+
+  // â”€â”€ Logo File Upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const logoFileInput = document.getElementById('logo-file-input');
   const logoFileName = document.getElementById('logo-file-name');
-  const logoPreviewImg = document.getElementById('logo-preview-img');
 
   if (logoFileInput) {
     logoFileInput.addEventListener('change', async (e) => {
       if (e.target.files.length === 0) return;
       const file = e.target.files[0];
-      logoFileName.innerText = file.name;
+      if (logoFileName) logoFileName.innerText = file.name;
 
       const formData = new FormData();
       formData.append('logo', file);
 
       try {
         const response = await fetch('/api/admin/upload-logo', {
-          method: 'POST',
-          credentials: 'same-origin',
-          body: formData
+          method: 'POST', credentials: 'same-origin', body: formData
         });
         const res = await response.json();
         if (res.success) {
-          alert("Custom logo uploaded successfully!");
-          if (logoPreviewImg) {
-            logoPreviewImg.src = res.logoUrl;
-          }
+          toastSuccess('Logo Uploaded', 'Custom logo applied successfully!');
         } else {
-          alert("Logo upload failed: " + res.error);
+          toastError('Logo Upload Failed', res.error);
         }
       } catch (err) {
-        console.error("Logo upload failed:", err);
-        alert("Error uploading logo: " + err.message);
+        console.error('Logo upload failed:', err);
+        toastError('Upload Error', err.message);
       }
     });
   }
 
+  // â”€â”€ Logo Width Slider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const logoWidthSlider = document.getElementById('logo-width-slider');
   const logoWidthVal = document.getElementById('logo-width-val');
 
   if (logoWidthSlider) {
     logoWidthSlider.addEventListener('input', (e) => {
-      logoWidthVal.innerText = e.target.value + 'px';
+      if (logoWidthVal) logoWidthVal.innerText = e.target.value + 'px';
     });
-
     logoWidthSlider.addEventListener('change', async (e) => {
       const val = parseInt(e.target.value, 10);
       try {
         const res = await adminFetch('/api/admin/settings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ logoWidth: val })
         });
-        if (!res.success) {
-          alert("Failed to update logo width: " + res.error);
-        }
+        if (!res.success) toastError('Save Failed', res.error);
       } catch (err) {
-        console.error("Failed to update logo width settings:", err);
+        console.error('Failed to update logo width settings:', err);
       }
     });
   }
 
-  const retentionInput = document.getElementById('photo-retention-input');
-  if (retentionInput) {
-    retentionInput.addEventListener('change', async (e) => {
-      const val = parseFloat(e.target.value);
+  // â”€â”€ Gallery Heading Save Button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const saveGalleryHeadingBtn = document.getElementById('save-gallery-heading-btn');
+  if (saveGalleryHeadingBtn) {
+    saveGalleryHeadingBtn.addEventListener('click', async () => {
+      const headingInput = document.getElementById('gallery-heading-input');
+      const heading = headingInput ? headingInput.value.toString().trim() : 'Gallery Catalog';
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ publicGalleryHeading: heading })
+        });
+        if (res.success) {
+          toastSuccess('Heading Saved', 'Public gallery heading updated.');
+          const indicator = document.getElementById('gallery-heading-saved-indicator');
+          if (indicator) { indicator.style.display = 'block'; setTimeout(() => { indicator.style.display = 'none'; }, 3000); }
+        } else {
+          toastError('Save Failed', res.error);
+        }
+      } catch (err) {
+        console.error('Failed to update gallery heading:', err);
+      }
+    });
+  }
+
+  // â”€â”€ Photo Retention Save Button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const saveRetentionBtn = document.getElementById('save-retention-btn');
+  if (saveRetentionBtn) {
+    saveRetentionBtn.addEventListener('click', async () => {
+      const retentionInput = document.getElementById('photo-retention-input');
+      const val = parseFloat(retentionInput ? retentionInput.value : '0');
       if (isNaN(val) || val < 0) {
-        alert("Please enter a valid number of hours (0 or greater).");
+        toastError('Validation Error', 'Please enter a valid number of hours (0 or greater).');
         return;
       }
       try {
         const res = await adminFetch('/api/admin/settings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ photoRetentionHours: val })
         });
         if (res.success) {
-          console.log("Photo retention period updated to " + val + " hours");
+          toastSuccess('Retention Saved', val === 0 ? 'Photos will be kept forever.' : `Photos auto-delete after ${val}h.`);
+          const indicator = document.getElementById('retention-saved-indicator');
+          if (indicator) { indicator.style.display = 'block'; setTimeout(() => { indicator.style.display = 'none'; }, 3000); }
         } else {
-          alert("Failed to update photo retention settings: " + res.error);
+          toastError('Save Failed', res.error);
         }
       } catch (err) {
-        console.error("Failed to update photo retention settings:", err);
+        console.error('Failed to update photo retention settings:', err);
       }
     });
   }
 
-  const galleryHeadingInput = document.getElementById('gallery-heading-input');
-  if (galleryHeadingInput) {
-    galleryHeadingInput.addEventListener('change', async (e) => {
-      const heading = e.target.value.toString().trim();
-      try {
-        const res = await adminFetch('/api/admin/settings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ publicGalleryHeading: heading })
-        });
-        if (!res.success) {
-          alert("Failed to update gallery heading: " + res.error);
-        }
-      } catch (err) {
-        console.error("Failed to update gallery heading:", err);
-      }
-    });
-  }
-
-  // Google Credentials Save Event
+  // â”€â”€ Google Credentials Save â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const saveCredsBtn = document.getElementById('gdrive-save-creds-btn');
   if (saveCredsBtn) {
     saveCredsBtn.addEventListener('click', async () => {
       const clientId = document.getElementById('gdrive-client-id').value;
       const clientSecret = document.getElementById('gdrive-client-secret').value;
-      
       try {
         const res = await adminFetch('/api/admin/settings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            googleClientId: clientId,
-            googleClientSecret: clientSecret
-          })
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ googleClientId: clientId, googleClientSecret: clientSecret })
         });
         if (res.success) {
-          alert("Google OAuth credentials saved successfully!");
+          toastSuccess('Credentials Saved', 'Google OAuth credentials stored successfully.');
           await loadDashboardData();
         } else {
-          alert("Failed to save credentials: " + res.error);
+          toastError('Save Failed', res.error);
         }
       } catch (err) {
-        console.error("Save credentials error:", err);
+        console.error('Save credentials error:', err);
       }
     });
   }
 
-  // Google OAuth Authorization Redirect Connect Event
+  // â”€â”€ Google Drive Connect â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const gdriveConnectBtn = document.getElementById('gdrive-connect-btn');
   if (gdriveConnectBtn) {
     gdriveConnectBtn.addEventListener('click', async () => {
       const clientId = document.getElementById('gdrive-client-id').value.trim();
       const clientSecret = document.getElementById('gdrive-client-secret').value.trim();
       if (!clientId) {
-        alert("Please enter your Google Client ID.");
+        toastError('Missing Client ID', 'Please enter your Google Client ID.');
         return;
       }
-
       gdriveConnectBtn.disabled = true;
       gdriveConnectBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
-
       try {
         const payload = { googleClientId: clientId };
         if (clientSecret) payload.googleClientSecret = clientSecret;
-
         const res = await adminFetch('/api/admin/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-
         if (!res.success) {
-          alert("Failed to save Google credentials: " + (res.error || 'Unknown error'));
+          toastError('Save Failed', res.error || 'Could not save credentials.');
           return;
         }
-
         window.location.href = '/api/google/auth';
       } catch (err) {
         console.error('Connect Google Drive error:', err);
@@ -1018,58 +1198,50 @@ function setupSettingsEvents() {
     });
   }
 
-  // Google Drive Sync Event
+  // â”€â”€ Google Drive Sync â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const gdriveSyncBtn = document.getElementById('gdrive-sync-btn');
   if (gdriveSyncBtn) {
     gdriveSyncBtn.addEventListener('click', async () => {
       try {
         gdriveSyncBtn.disabled = true;
         gdriveSyncBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Syncing...';
-        
-        const res = await adminFetch('/api/admin/sync', {
-          method: 'POST'
-        });
-        
+        const res = await adminFetch('/api/admin/sync', { method: 'POST' });
         if (res.success) {
-          alert(`Google Drive synced successfully! Processed ${res.count} new photo(s).`);
+          toastSuccess('Drive Synced', `Google Drive synced. Processed ${res.count} new photo(s).`);
           await loadDashboardData();
         } else {
-          alert("Sync failed: " + (res.error || 'Unknown error'));
+          toastError('Sync Failed', res.error || 'Unknown error');
         }
       } catch (err) {
-        console.error("Sync error:", err);
-        alert("Sync error: " + err.message);
+        console.error('Sync error:', err);
+        toastError('Sync Error', err.message);
       } finally {
         gdriveSyncBtn.disabled = false;
-        gdriveSyncBtn.innerHTML = '<i class="fa-solid fa-rotate"></i> Sync Google Drive Photos';
+        gdriveSyncBtn.innerHTML = '<i class="fa-solid fa-rotate"></i> Sync Drive Photos';
       }
     });
   }
 
-  // Google Disconnect Event
+  // â”€â”€ Google Drive Disconnect â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const gdriveDisconnectBtn = document.getElementById('gdrive-disconnect-btn');
   if (gdriveDisconnectBtn) {
     gdriveDisconnectBtn.addEventListener('click', async () => {
-      if (!confirm("Are you sure you want to disconnect Google Drive? New uploads will use Firebase Storage until you reconnect.")) {
-        return;
-      }
+      if (!confirm('Are you sure you want to disconnect Google Drive?')) return;
       try {
-        const res = await adminFetch('/api/google/disconnect', {
-          method: 'POST'
-        });
+        const res = await adminFetch('/api/google/disconnect', { method: 'POST' });
         if (res.success) {
-          alert("Google Drive disconnected successfully.");
+          toastSuccess('Disconnected', 'Google Drive disconnected successfully.');
           await loadDashboardData();
         } else {
-          alert("Disconnect failed: " + res.error);
+          toastError('Disconnect Failed', res.error);
         }
       } catch (err) {
-        console.error("Disconnect error:", err);
+        console.error('Disconnect error:', err);
       }
     });
   }
 
-  // Gallery Announcement Message Save
+  // â”€â”€ Gallery Announcement Save â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const saveGalleryMsgBtn = document.getElementById('save-gallery-message-btn');
   if (saveGalleryMsgBtn) {
     saveGalleryMsgBtn.addEventListener('click', async () => {
@@ -1078,17 +1250,14 @@ function setupSettingsEvents() {
       const message = galleryMsgInput ? galleryMsgInput.value : '';
       try {
         const res = await adminFetch('/api/admin/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ galleryMessage: message })
         });
         if (res.success) {
-          if (savedIndicator) {
-            savedIndicator.style.display = 'block';
-            setTimeout(() => { savedIndicator.style.display = 'none'; }, 3000);
-          }
+          if (savedIndicator) { savedIndicator.style.display = 'block'; setTimeout(() => { savedIndicator.style.display = 'none'; }, 3000); }
+          toastSuccess('Announcement Saved', 'Gallery announcement updated successfully.');
         } else {
-          alert('Failed to save announcement: ' + res.error);
+          toastError('Save Failed', res.error);
         }
       } catch (err) {
         console.error('Gallery message save error:', err);
@@ -1096,7 +1265,7 @@ function setupSettingsEvents() {
     });
   }
 
-  // Default Public Event Save
+  // â”€â”€ Default Public Event Save â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const saveDefaultEventBtn = document.getElementById('save-default-event-btn');
   if (saveDefaultEventBtn) {
     saveDefaultEventBtn.addEventListener('click', async () => {
@@ -1105,18 +1274,15 @@ function setupSettingsEvents() {
       const defaultPublicEventId = defaultSelect ? defaultSelect.value : 'all';
       try {
         const res = await adminFetch('/api/admin/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ defaultPublicEventId })
         });
         if (res.success) {
           window.defaultPublicEventId = defaultPublicEventId;
-          if (savedIndicator) {
-            savedIndicator.style.display = 'block';
-            setTimeout(() => { savedIndicator.style.display = 'none'; }, 3000);
-          }
+          if (savedIndicator) { savedIndicator.style.display = 'block'; setTimeout(() => { savedIndicator.style.display = 'none'; }, 3000); }
+          toastSuccess('Default Event Saved', 'Gallery landing event updated.');
         } else {
-          alert('Failed to save default event: ' + res.error);
+          toastError('Save Failed', res.error);
         }
       } catch (err) {
         console.error('Save default event error:', err);
@@ -1580,7 +1746,7 @@ function updateAdminQueueItemUI(item) {
     statusEl.innerHTML = `<i class="fa-solid fa-arrow-up-from-bracket fa-bounce" style="color:#8b5cf6"></i> Uploading...`;
   } else if (item.status === 'done') {
     statusEl.className = 'preview-status ready';
-    const label = item.faceCount > 0 ? `Uploaded · ${item.faceCount} face(s)` : 'Uploaded · no face';
+    const label = item.faceCount > 0 ? `Uploaded Â· ${item.faceCount} face(s)` : 'Uploaded Â· no face';
     statusEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#10b981"></i> ${label}`;
   } else if (item.status === 'failed') {
     statusEl.className = 'preview-status failed';
@@ -1713,10 +1879,10 @@ function populateAdminEventDropdowns() {
   const uploadSelect = document.getElementById('admin-upload-event-select');
 
   const customEvents = (window.allEvents || []).filter(e => e.id !== 'all');
-  const eventOptions = customEvents.map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
+  const eventOptions = customEvents.map(evt => `<option value="${evt.id}">ðŸ“ ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' ðŸ”’' : ''}</option>`).join('');
 
   if (globalPicker) {
-    globalPicker.innerHTML = `<option value="all">📁 All Photos / All Events (Full Catalog)</option>` + eventOptions;
+    globalPicker.innerHTML = `<option value="all">ðŸ“ All Photos / All Events (Full Catalog)</option>` + eventOptions;
     globalPicker.value = window.adminActiveEventId || 'all';
 
     if (!globalPicker.dataset.listenerAttached) {
@@ -1729,7 +1895,7 @@ function populateAdminEventDropdowns() {
 
   if (uploadSelect) {
     uploadSelect.innerHTML = `<option value="">-- General / All Photos Default --</option>` +
-      customEvents.map(evt => `<option value="${evt.id}">${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
+      customEvents.map(evt => `<option value="${evt.id}">${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' ðŸ”’' : ''}</option>`).join('');
     uploadSelect.value = window.adminActiveEventId === 'all' ? '' : window.adminActiveEventId;
 
     if (!uploadSelect.dataset.listenerAttached) {
@@ -1744,8 +1910,8 @@ function populateAdminEventDropdowns() {
   if (defaultSelect) {
     const allEvt = (window.allEvents || []).find(e => e.id === 'all');
     const isAllVisible = !allEvt || allEvt.showInPublicGallery !== false;
-    defaultSelect.innerHTML = `<option value="all">🎉 All Photos / All Events ${isAllVisible ? '(Public Catalog)' : '(Hidden in Public)'}</option>` +
-      customEvents.map(evt => `<option value="${evt.id}">📁 ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' 🔒' : ''}</option>`).join('');
+    defaultSelect.innerHTML = `<option value="all">ðŸŽ‰ All Photos / All Events ${isAllVisible ? '(Public Catalog)' : '(Hidden in Public)'}</option>` +
+      customEvents.map(evt => `<option value="${evt.id}">ðŸ“ ${evt.title || evt.name}${evt.hasPasscode || evt.passcode ? ' ðŸ”’' : ''}</option>`).join('');
     defaultSelect.value = window.defaultPublicEventId || 'all';
   }
 }

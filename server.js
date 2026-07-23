@@ -604,22 +604,28 @@ async function syncGoogleDrivePhotos(req = null, forceAll = false) {
         let faceDetectionStatus = 'No Face Detected';
         let faceDetected = false;
 
-        try {
-          const detectResult = await runPythonFaceDetector(tempPath);
-          if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
-            descriptors = detectResult.faces;
-            if (descriptors.length > 0) {
-              faceDetectionStatus = 'Face Detected';
-              faceDetected = true;
+        const isFaceDetectionEnabled = settings.faceDetectionEnabled !== false;
+        if (!isFaceDetectionEnabled) {
+          console.log(`[GDrive Sync] Face Detection is DISABLED globally. Skipping detection for ${file.name}.`);
+          faceDetectionStatus = 'Skipped (Detection Disabled)';
+        } else {
+          try {
+            const detectResult = await runPythonFaceDetector(tempPath);
+            if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
+              descriptors = detectResult.faces;
+              if (descriptors.length > 0) {
+                faceDetectionStatus = 'Face Detected';
+                faceDetected = true;
+              }
+              console.log(`[GDrive Sync] Face detection found ${descriptors.length} face(s) for ${file.name}`);
+            } else {
+              console.warn(`[GDrive Sync] Face detection returned no faces or error:`, detectResult ? detectResult.error : 'no response');
             }
-            console.log(`[GDrive Sync] Face detection found ${descriptors.length} face(s) for ${file.name}`);
-          } else {
-            console.warn(`[GDrive Sync] Face detection returned no faces or error:`, detectResult ? detectResult.error : 'no response');
+          } catch (detectErr) {
+            console.error(`[GDrive Sync] Face detection failed for ${file.name}:`, detectErr.message);
+            faceDetectionStatus = 'Failed to process';
+            faceDetected = false;
           }
-        } catch (detectErr) {
-          console.error(`[GDrive Sync] Face detection failed for ${file.name}:`, detectErr.message);
-          faceDetectionStatus = 'Failed to process';
-          faceDetected = false;
         }
 
         // 4. Save metadata to Firestore / Local gallery DB
@@ -755,17 +761,24 @@ async function syncLocalUploadsIfNeeded() {
         let faceDetectionStatus = 'No Face Detected';
         let faceDetected = false;
 
-        try {
-          const detectResult = await runPythonFaceDetector(filePath);
-          if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
-            descriptors = detectResult.faces;
-            if (descriptors.length > 0) {
-              faceDetectionStatus = 'Face Detected';
-              faceDetected = true;
+        const syncSettings = await readSettings();
+        const isFaceDetectionEnabled = syncSettings.faceDetectionEnabled !== false;
+        if (!isFaceDetectionEnabled) {
+          console.log(`[Local Sync] Face Detection is DISABLED globally. Skipping detection for ${file}.`);
+          faceDetectionStatus = 'Skipped (Detection Disabled)';
+        } else {
+          try {
+            const detectResult = await runPythonFaceDetector(filePath);
+            if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
+              descriptors = detectResult.faces;
+              if (descriptors.length > 0) {
+                faceDetectionStatus = 'Face Detected';
+                faceDetected = true;
+              }
             }
+          } catch (detectErr) {
+            console.error(`[Local Sync] Face detection failed for ${file}:`, detectErr.message);
           }
-        } catch (detectErr) {
-          console.error(`[Local Sync] Face detection failed for ${file}:`, detectErr.message);
         }
 
         const photoId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -1586,7 +1599,12 @@ async function processUploadTask(req) {
 
   // Run server-side face detection fallback if no descriptors provided
   if (!descriptors || descriptors.length === 0) {
-    if (process.env.VERCEL) {
+    const isFaceDetectionEnabled = settings.faceDetectionEnabled !== false;
+    if (!isFaceDetectionEnabled) {
+      // Face detection globally disabled — skip pipeline entirely
+      console.log(`[Upload] Face Detection is DISABLED globally. Storing ${originalFileName} with empty descriptors.`);
+      faceDetectionError = 'Face detection disabled by admin';
+    } else if (process.env.VERCEL) {
       console.log(`[Upload] Vercel Serverless Mode: No client face descriptors provided for ${originalFileName}. Saving photo with empty descriptors.`);
       faceDetectionError = 'No face detected during client upload';
     } else {
@@ -1685,9 +1703,11 @@ async function processUploadTask(req) {
     descriptors,
     status: isAdmin ? (req.body.status || 'approved') : 'pending',
     isPublic: isAdmin ? (req.body.isPublic === 'false' || req.body.isPublic === false ? false : true) : false,
-    faceDetectionStatus: descriptors.length > 0 
-      ? 'Face Detected' 
-      : (faceDetectionError ? `Face Detection Error: ${faceDetectionError}` : 'No Face Detected'),
+    faceDetectionStatus: settings.faceDetectionEnabled === false
+      ? 'Skipped (Detection Disabled)'
+      : (descriptors.length > 0
+          ? 'Face Detected'
+          : (faceDetectionError ? `Face Detection Error: ${faceDetectionError}` : 'No Face Detected')),
     faceDetected: descriptors.length > 0
   };
 
@@ -2110,13 +2130,14 @@ app.get('/api/admin/settings', checkAdminAuth, async (req, res) => {
 });
 
 app.post('/api/admin/settings', checkAdminAuth, async (req, res) => {
-  const { publicGalleryEnabled, publicGalleryHeading, defaultPublicEventId, allowPublicFaceAdjustment, newPassword, logoWidth, photoRetentionHours, googleClientId, googleClientSecret, galleryMessage } = req.body;
+  const { publicGalleryEnabled, publicGalleryHeading, defaultPublicEventId, allowPublicFaceAdjustment, faceDetectionEnabled, newPassword, logoWidth, photoRetentionHours, googleClientId, googleClientSecret, galleryMessage } = req.body;
   const settings = await readSettings();
 
   if (publicGalleryEnabled !== undefined) settings.publicGalleryEnabled = !!publicGalleryEnabled;
   if (publicGalleryHeading !== undefined) settings.publicGalleryHeading = publicGalleryHeading.toString().trim() || 'Gallery Catalog';
   if (defaultPublicEventId !== undefined) settings.defaultPublicEventId = defaultPublicEventId.toString().trim() || 'all';
   if (allowPublicFaceAdjustment !== undefined) settings.allowPublicFaceAdjustment = !!allowPublicFaceAdjustment;
+  if (faceDetectionEnabled !== undefined) settings.faceDetectionEnabled = !!faceDetectionEnabled;
   if (newPassword && newPassword.trim() !== '') settings.adminPassword = newPassword.trim();
   if (logoWidth !== undefined) settings.logoWidth = parseInt(logoWidth, 10) || 245;
   if (photoRetentionHours !== undefined) settings.photoRetentionHours = parseFloat(photoRetentionHours);
