@@ -923,6 +923,8 @@ app.get('/api/gallery', async (req, res) => {
       publicPhotos = publicPhotos.filter(photo => photo.eventId === requestedEventId);
     }
 
+    publicPhotos.sort((a, b) => new Date(b.timestamp || b.uploadTime || 0) - new Date(a.timestamp || a.uploadTime || 0));
+
     res.json({
       success: true,
       photos: publicPhotos,

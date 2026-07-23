@@ -669,7 +669,7 @@
   class BatchUploadQueue {
     constructor(options = {}) {
       this.concurrency = options.concurrency || 1;
-      this.maxQueueSize = options.maxQueueSize || 15;
+      this.maxQueueSize = options.maxQueueSize || 100;
       this.maxRetries = options.maxRetries || 3;
       this.isPublic = options.isPublic !== undefined ? options.isPublic : true;
       this.onItemChange = options.onItemChange || (() => { });

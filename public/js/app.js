@@ -46,6 +46,7 @@ async function computeFaceDescriptorsWithTimeout(source, timeoutMs = 15000) {
 
 // Limits to protect browser memory
 const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB per file
+const SEARCH_MAX_UPLOAD_SIZE = 30 * 1024 * 1024; // 30 MB max for face search
 const MAX_UPLOAD_QUEUE = 15; // max files in client-side queue (limit 15)
 const MAX_ZIP_DOWNLOAD = 20; // max images to bundle client-side
 // Gallery refresh settings
@@ -119,7 +120,7 @@ async function fetchGallery() {
         return;
       }
 
-      window.galleryCatalog = result.photos;
+      window.galleryCatalog = (result.photos || []).sort((a, b) => new Date(b.timestamp || b.uploadTime || 0) - new Date(a.timestamp || a.uploadTime || 0));
       window.publicGalleryEnabled = result.publicGalleryEnabled !== false;
       window.galleryHeading = result.galleryHeading || 'Gallery Catalog';
       window.allowPublicFaceAdjustment = result.allowPublicFaceAdjustment !== false;
@@ -921,8 +922,8 @@ async function handleSearchFileSelected(file) {
   const feedbackDesc = document.getElementById('feedback-desc');
   const searchBtn = document.getElementById('execute-search-btn');
 
-  // Check file size for search image
-  if (file.size > MAX_UPLOAD_SIZE) {
+  // Check file size for search image (30 MB limit)
+  if (file.size > SEARCH_MAX_UPLOAD_SIZE) {
     alert('Search image is too large. Please use an image up to 30 MB.');
     clearSearchFile();
     return;
@@ -1461,38 +1462,13 @@ function openLightbox(photo) {
 
   modal.style.display = 'flex';
 
-  // Draw face highlight boxes in lightbox on top of the image
+  // Clear lightbox canvas - public gallery will not display face bounding box overlay
   img.onload = () => {
     canvas.width = img.clientWidth;
     canvas.height = img.clientHeight;
     
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (photo.descriptors && photo.descriptors.length > 0) {
-      const scaleX = img.clientWidth / img.naturalWidth;
-      const scaleY = img.clientHeight / img.naturalHeight;
-
-      ctx.strokeStyle = '#c084fc';
-      ctx.lineWidth = 3;
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = '#8b5cf6';
-
-      photo.descriptors.forEach(faceData => {
-        const box = faceData.box;
-        if (box) {
-          const x = box.x * scaleX;
-          const y = box.y * scaleY;
-          const width = box.width * scaleX;
-          const height = box.height * scaleY;
-          
-          ctx.beginPath();
-          ctx.roundRect(x, y, width, height, 6);
-          ctx.stroke();
-        }
-      });
-      ctx.shadowBlur = 0;
-    }
   };
 }
 

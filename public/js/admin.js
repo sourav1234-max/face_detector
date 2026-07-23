@@ -11,7 +11,7 @@ window.selectedPhotoForLightbox = null;
 window.faceApiLoaded = false;
 // Admin-side limits to prevent memory issues
 const ADMIN_MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB
-const ADMIN_MAX_UPLOAD_QUEUE = 15; // max files admin can queue (limit 15)
+const ADMIN_MAX_UPLOAD_QUEUE = 100; // max files admin can queue (limit 100)
 const ADMIN_MOD_TABLE_PAGE_SIZE = 12; // rows per moderation page (reduced to avoid memory spikes)
 let adminModCurrentPage = 0;
 
@@ -1190,10 +1190,10 @@ function openAdminLightbox(photoId) {
       const scaleX = img.clientWidth / img.naturalWidth;
       const scaleY = img.clientHeight / img.naturalHeight;
 
-      ctx.strokeStyle = '#c084fc';
+      ctx.strokeStyle = '#3b82f6';
       ctx.lineWidth = 3;
       ctx.shadowBlur = 8;
-      ctx.shadowColor = '#8b5cf6';
+      ctx.shadowColor = '#2563eb';
 
       photo.descriptors.forEach(faceData => {
         const box = faceData.box;
