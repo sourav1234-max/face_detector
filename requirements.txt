@@ -1,3 +1,4 @@
-face_recognition
+mediapipe
 Pillow
 numpy
+opencv-python-headless

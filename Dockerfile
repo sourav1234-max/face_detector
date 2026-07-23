@@ -1,15 +1,14 @@
 FROM node:20-bullseye-slim
 
-# Install Python and build dependencies required by face_recognition and Pillow
+# Install Python and dependencies required by MediaPipe, OpenCV, and Pillow
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-dev \
-    build-essential \
-    cmake \
-    libopenblas-dev \
-    liblapack-dev \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
     libjpeg-dev \
     zlib1g-dev \
     libpng-dev \

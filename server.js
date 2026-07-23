@@ -1516,11 +1516,11 @@ function verifyPythonSetup() {
     'py',
     'C:\\Users\\SOURAV SENAPATI\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'
   ];
-  const testScript = "import sys; import face_recognition; import PIL; import numpy; print('OK')";
+  const testScript = "import sys; import mediapipe; import PIL; import numpy; print('OK')";
 
   const tryCheck = (index) => {
     if (index >= cmds.length) {
-      console.warn('\x1b[33m[Startup Warning] No working Python installation with face_recognition library was found.\x1b[0m');
+      console.warn('\x1b[33m[Startup Warning] No working Python installation with mediapipe library was found.\x1b[0m');
       console.warn('\x1b[33mServer-side face detection fallback will NOT work. Please run "pip install -r requirements.txt".\x1b[0m');
       return;
     }
