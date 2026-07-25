@@ -151,6 +151,26 @@ async function fetchGallery() {
         }
       }
       
+      // Update Studio Profile Card
+      const studioTitleEl = document.getElementById('studio-title');
+      const studioOwnerEl = document.getElementById('studio-owner');
+      const studioPhoneTextEl = document.getElementById('studio-phone-text');
+      const studioPhoneLinkEl = document.getElementById('studio-phone-link');
+      const studioWhatsappLinkEl = document.getElementById('studio-whatsapp-link');
+      const studioMapLinkEl = document.getElementById('studio-map-link');
+      const studioLocationTextEl = document.getElementById('studio-location-text');
+
+      if (studioTitleEl && result.studioName) studioTitleEl.innerText = result.studioName;
+      if (studioOwnerEl && result.studioOwner) studioOwnerEl.innerText = result.studioOwner;
+      if (studioPhoneTextEl && result.studioPhone) studioPhoneTextEl.innerText = result.studioPhone;
+      if (studioPhoneLinkEl && result.studioPhone) studioPhoneLinkEl.href = `tel:${result.studioPhone}`;
+      if (studioWhatsappLinkEl && result.studioPhone) studioWhatsappLinkEl.href = `https://wa.me/91${result.studioPhone.replace(/\D/g, '')}`;
+      if (studioLocationTextEl && result.studioLocation) studioLocationTextEl.innerText = result.studioLocation;
+      if (studioMapLinkEl) {
+        const mapUrl = result.studioMapUrl || `https://maps.google.com/?q=${encodeURIComponent(result.studioLocation || 'Majuria, Bankura')}`;
+        studioMapLinkEl.href = mapUrl;
+      }
+
       updateGalleryUI();
     }
   } catch (err) {
@@ -573,11 +593,13 @@ function updateGalleryUI() {
 // --- Multi-Select Gallery Logic ---
 function toggleSelectMode() {
   window.isSelectMode = !window.isSelectMode;
+  document.body.classList.toggle('select-mode-active', window.isSelectMode);
   const selectModeBtn = document.getElementById('gallery-select-mode-btn');
   const batchBar = document.getElementById('gallery-batch-bar');
 
   if (window.isSelectMode) {
     if (selectModeBtn) {
+      selectModeBtn.style.display = 'inline-flex';
       selectModeBtn.classList.remove('btn-secondary');
       selectModeBtn.classList.add('btn-primary');
       selectModeBtn.innerHTML = `<i class="fa-solid fa-xmark"></i> Exit Selection`;
@@ -586,6 +608,7 @@ function toggleSelectMode() {
   } else {
     window.selectedPhotoIds.clear();
     if (selectModeBtn) {
+      selectModeBtn.style.display = 'none';
       selectModeBtn.classList.remove('btn-primary');
       selectModeBtn.classList.add('btn-secondary');
       selectModeBtn.innerHTML = `<i class="fa-solid fa-list-check"></i> Select Photos`;
@@ -626,16 +649,34 @@ function updateSelectionUI() {
 }
 
 function selectAllPhotos() {
-  if (!window.galleryCatalog) return;
-  window.galleryCatalog.forEach(photo => {
+  const filtered = getFilteredGalleryPhotos();
+  if (!filtered) return;
+  filtered.forEach(photo => {
     if (photo.id) window.selectedPhotoIds.add(photo.id);
   });
-  if (!window.isSelectMode) toggleSelectMode(); else updateSelectionUI();
+  if (!window.isSelectMode) {
+    window.isSelectMode = true;
+    document.body.classList.add('select-mode-active');
+    const selectModeBtn = document.getElementById('gallery-select-mode-btn');
+    if (selectModeBtn) {
+      selectModeBtn.style.display = 'inline-flex';
+      selectModeBtn.classList.remove('btn-secondary');
+      selectModeBtn.classList.add('btn-primary');
+      selectModeBtn.innerHTML = `<i class="fa-solid fa-xmark"></i> Exit Selection`;
+    }
+    const batchBar = document.getElementById('gallery-batch-bar');
+    if (batchBar) batchBar.classList.remove('hidden');
+  }
+  updateSelectionUI();
 }
 
 function clearPhotoSelection() {
   window.selectedPhotoIds.clear();
-  updateSelectionUI();
+  if (window.isSelectMode) {
+    toggleSelectMode();
+  } else {
+    updateSelectionUI();
+  }
 }
 
 async function downloadSelectedPhotosZip() {
@@ -719,7 +760,67 @@ function renderGalleryPage() {
       itemEl.classList.add('selected');
     }
 
+    let longPressTimer = null;
+    let isLongPress = false;
+
+    const startPress = () => {
+      isLongPress = false;
+      longPressTimer = setTimeout(() => {
+        isLongPress = true;
+        if (navigator.vibrate) {
+          try { navigator.vibrate(50); } catch (_) {}
+        }
+        if (!window.isSelectMode) {
+          window.isSelectMode = true;
+          document.body.classList.add('select-mode-active');
+          const selectModeBtn = document.getElementById('gallery-select-mode-btn');
+          if (selectModeBtn) {
+            selectModeBtn.style.display = 'inline-flex';
+            selectModeBtn.classList.remove('btn-secondary');
+            selectModeBtn.classList.add('btn-primary');
+            selectModeBtn.innerHTML = `<i class="fa-solid fa-xmark"></i> Exit Selection`;
+          }
+          const batchBar = document.getElementById('gallery-batch-bar');
+          if (batchBar) batchBar.classList.remove('hidden');
+        }
+        if (photo.id) {
+          window.selectedPhotoIds.add(photo.id);
+        }
+        updateSelectionUI();
+      }, 500); // 500ms long press delay
+    };
+
+    const cancelPress = () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    };
+
+    itemEl.addEventListener('touchstart', startPress, { passive: true });
+    itemEl.addEventListener('touchend', cancelPress);
+    itemEl.addEventListener('touchmove', cancelPress);
+
+    itemEl.addEventListener('mousedown', (e) => {
+      if (e.button === 0) startPress();
+    });
+    itemEl.addEventListener('mouseup', cancelPress);
+    itemEl.addEventListener('mouseleave', cancelPress);
+
+    itemEl.addEventListener('contextmenu', (e) => {
+      if (isLongPress) {
+        e.preventDefault();
+      }
+    });
+
     itemEl.addEventListener('click', (e) => {
+      if (isLongPress) {
+        e.stopPropagation();
+        e.preventDefault();
+        isLongPress = false;
+        return;
+      }
+
       // Toggle selection if checkbox clicked or in select mode
       if (e.target.closest('.gallery-item-checkbox') || window.isSelectMode) {
         e.stopPropagation();
@@ -728,17 +829,12 @@ function renderGalleryPage() {
             window.selectedPhotoIds.delete(photo.id);
           } else {
             window.selectedPhotoIds.add(photo.id);
-            if (!window.isSelectMode) {
-              window.isSelectMode = true;
-              const selectModeBtn = document.getElementById('gallery-select-mode-btn');
-              if (selectModeBtn) {
-                selectModeBtn.classList.remove('btn-secondary');
-                selectModeBtn.classList.add('btn-primary');
-                selectModeBtn.innerHTML = `<i class="fa-solid fa-xmark"></i> Exit Selection`;
-              }
-            }
           }
-          updateSelectionUI();
+          if (window.selectedPhotoIds.size === 0 && window.isSelectMode) {
+            toggleSelectMode();
+          } else {
+            updateSelectionUI();
+          }
         }
       } else {
         openLightbox(photo);
@@ -761,10 +857,10 @@ function renderGalleryPage() {
       </div>
       ${badgeHtml}
       <div class="gallery-image-wrapper">
-        <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="gallery-image" alt="Gallery photo" loading="lazy">
+        <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="gallery-image" alt="${photo.originalName || 'Photo'}" loading="lazy">
         <div class="gallery-item-overlay">
           <div class="gallery-item-info">
-            <p class="gallery-item-name">${photo.originalName}</p>
+            <p class="gallery-item-name">${photo.originalName || 'Untitled'}</p>
             <p class="gallery-item-date">${dateStr}</p>
           </div>
         </div>

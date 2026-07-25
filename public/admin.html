@@ -12,6 +12,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Chart.js Library for Power BI Executive Analytics -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Main CSS -->
   <link rel="stylesheet" href="css/style.css">
 
@@ -752,6 +754,138 @@
       border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; margin-bottom: 14px;
     }
     .connection-status-row span { font-size: 12.5px; color: #64748b; font-weight: 500; }
+
+    /* ── Power BI Executive Dashboard Styling ──────────────────── */
+    .executive-header {
+      display: flex; justify-content: space-between; align-items: center;
+      flex-wrap: wrap; gap: 14px; margin-bottom: 20px;
+      padding-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+    .executive-title {
+      font-family: 'Outfit', sans-serif; font-size: 20px; font-weight: 700;
+      color: #fff; display: flex; align-items: center; gap: 10px;
+    }
+    .executive-badge {
+      font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 12px;
+      background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3);
+      display: inline-flex; align-items: center; gap: 5px; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .executive-controls {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .time-range-picker {
+      display: flex; background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 2px;
+    }
+    .time-btn {
+      background: none; border: none; color: #94a3b8; font-size: 12px; font-weight: 600;
+      padding: 5px 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s ease;
+    }
+    .time-btn:hover { color: #fff; background: rgba(255,255,255,0.05); }
+    .time-btn.active {
+      background: linear-gradient(135deg, rgba(139,92,246,0.3), rgba(59,130,246,0.3));
+      color: #fff; border: 1px solid rgba(139,92,246,0.4); box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+
+    /* KPI Grid & Tile Aesthetics */
+    .kpi-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 16px; margin-bottom: 22px;
+    }
+    .kpi-tile {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px; padding: 16px 18px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+      position: relative; overflow: hidden;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    .kpi-tile:hover {
+      transform: translateY(-2px);
+      border-color: rgba(139,92,246,0.35);
+      box-shadow: 0 14px 40px rgba(0,0,0,0.35);
+    }
+    .kpi-tile.kpi-purple { border-top: 3px solid #8b5cf6; }
+    .kpi-tile.kpi-blue   { border-top: 3px solid #3b82f6; }
+    .kpi-tile.kpi-emerald{ border-top: 3px solid #10b981; }
+    .kpi-tile.kpi-amber  { border-top: 3px solid #f59e0b; }
+
+    .kpi-top {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+    }
+    .kpi-label {
+      font-size: 12px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .kpi-trend {
+      font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px;
+    }
+    .kpi-trend.positive { background: rgba(16,185,129,0.15); color: #34d399; }
+    .kpi-trend.neutral  { background: rgba(59,130,246,0.15); color: #60a5fa; }
+    .kpi-badge {
+      font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px;
+      background: rgba(139,92,246,0.15); color: #c084fc; border: 1px solid rgba(139,92,246,0.25);
+    }
+    .kpi-main { margin-bottom: 12px; }
+    .kpi-val {
+      font-family: 'Outfit', sans-serif; font-size: 32px; font-weight: 800;
+      color: #fff; line-height: 1.1; letter-spacing: -0.5px;
+    }
+    .kpi-sub { font-size: 12px; color: #64748b; margin-top: 4px; font-weight: 500; }
+    .kpi-val-group { display: flex; align-items: baseline; gap: 8px; }
+    .kpi-val-sub { font-size: 13px; color: #94a3b8; font-weight: 500; }
+    .kpi-footer {
+      display: flex; justify-content: space-between; align-items: center;
+      padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.05);
+      font-size: 11.5px; color: #94a3b8; flex-wrap: wrap; gap: 6px;
+    }
+
+    /* Power BI Visual Grid */
+    .powerbi-grid {
+      display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; margin-bottom: 22px;
+    }
+    .pbi-card {
+      grid-column: span 6; background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 18px;
+      backdrop-filter: blur(12px); box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+      display: flex; flex-direction: column; transition: border-color 0.2s ease;
+    }
+    .pbi-card:hover { border-color: rgba(255,255,255,0.14); }
+    .pbi-card.pbi-wide { grid-column: span 12; }
+    @media (max-width: 1024px) {
+      .pbi-card { grid-column: span 12; }
+    }
+    .pbi-card-header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      margin-bottom: 14px; flex-wrap: wrap; gap: 10px;
+    }
+    .pbi-card-title {
+      font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 700;
+      color: #fff; display: flex; align-items: center; gap: 8px;
+    }
+    .pbi-card-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .pbi-chart-box {
+      position: relative; width: 100%; height: 260px; flex: 1; min-height: 240px;
+    }
+
+    /* Audit Log Stream Table */
+    .audit-log-container {
+      max-height: 260px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent;
+    }
+    .audit-log-table {
+      width: 100%; border-collapse: collapse; text-align: left; font-size: 12.5px;
+    }
+    .audit-log-table th {
+      position: sticky; top: 0; background: #0f172a; color: #64748b;
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px;
+      padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); z-index: 10;
+    }
+    .audit-log-table td {
+      padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); color: #cbd5e1;
+    }
+    .audit-log-table tr:hover { background: rgba(255,255,255,0.02); }
   </style>
 </head>
 
@@ -846,6 +980,10 @@
           <i class="fa-solid fa-shield-halved nav-icon"></i>
           <span class="nav-text">Security</span>
         </div>
+        <div class="nav-item" data-section="firestore" id="nav-firestore">
+          <i class="fa-solid fa-fire-flame-curved nav-icon" style="color:#f97316;"></i>
+          <span class="nav-text">Firestore & RAM Cache</span>
+        </div>
       </nav>
 
       <div class="sidebar-footer">
@@ -902,103 +1040,178 @@
       <!-- Content -->
       <div class="admin-content">
 
-        <!-- ═══════════════ OVERVIEW ══════════════════════════ -->
+        <!-- ═══════════════ EXECUTIVE ANALYTICS DASHBOARD ══════════════════════════ -->
         <div class="content-section active" id="section-overview">
-          <h1 class="section-title"><i class="fa-solid fa-chart-pie" style="color:#8b5cf6; font-size:20px; margin-right:8px;"></i>Overview</h1>
-          <p class="section-subtitle">Real-time statistics for your photo gallery and face detection pipeline.</p>
 
-          <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-val" id="stat-total">0</div>
-              <span class="stat-label">Total Photos</span>
-            </div>
-            <div class="stat-card stat-pending">
-              <div class="stat-val" id="stat-pending">0</div>
-              <span class="stat-label">Pending</span>
-            </div>
-            <div class="stat-card stat-approved">
-              <div class="stat-val" id="stat-approved">0</div>
-              <span class="stat-label">Approved</span>
-            </div>
-            <div class="stat-card stat-rejected">
-              <div class="stat-val" id="stat-rejected">0</div>
-              <span class="stat-label">Rejected</span>
-            </div>
-            <div class="stat-card stat-face">
-              <div class="stat-val" id="stat-no-face">0</div>
-              <span class="stat-label">No Face Data</span>
-            </div>
-            <div class="stat-card" style="background:rgba(245,158,11,0.06); border-color:rgba(245,158,11,0.15);">
-              <div class="stat-val" id="stat-review-pending" style="color:#fbbf24;">0</div>
-              <span class="stat-label" style="color:#92400e;">Review Pending</span>
-            </div>
-            <div class="stat-card" style="background:rgba(16,185,129,0.06); border-color:rgba(16,185,129,0.15);">
-              <div class="stat-val" id="stat-review-done" style="color:#34d399;">0</div>
-              <span class="stat-label" style="color:#064e3b;">Review Done</span>
-            </div>
-          </div>
-
-          <!-- Firebase Operations & RAM Cache Performance Card -->
-          <div class="dash-card" style="margin: 18px 0; background: linear-gradient(135deg, rgba(139,92,246,0.08), rgba(59,130,246,0.05)); border: 1px solid rgba(139,92,246,0.25);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
-              <div>
-                <div class="dash-card-title" style="font-size:15px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
-                  <i class="fa-solid fa-fire-flame-curved" style="color:#f97316;"></i> Firebase Operations & RAM Cache Tracker
-                </div>
-                <div class="dash-card-sub" style="font-size:12px; color:#94a3b8;">Real-time tracking of Firestore reads, writes, deletes, and RAM cache saved operations</div>
+          <!-- Executive Dashboard Header & Toolbar -->
+          <div class="executive-header">
+            <div>
+              <div class="executive-title">
+                <i class="fa-solid fa-chart-line" style="color:#8b5cf6;"></i>
+                <span>Executive Power BI Analytics</span>
+                <span class="executive-badge"><i class="fa-solid fa-bolt" style="color:#fbbf24;"></i> Live Engine</span>
               </div>
-              <button class="btn btn-secondary btn-sm" id="btn-refresh-metrics" title="Refresh metrics" style="padding:6px 12px; font-size:12px;">
-                <i class="fa-solid fa-rotate-right"></i> Refresh Stats
+              <p class="section-subtitle" style="margin-bottom:0;">Real-time statistics for your photo gallery, moderation queue, and AI face recognition pipeline.</p>
+            </div>
+
+            <div class="executive-controls">
+              <!-- Time Range Filter -->
+              <div class="time-range-picker" id="pbi-time-picker">
+                <button class="time-btn active" data-range="all">All Time</button>
+                <button class="time-btn" data-range="30d">30 Days</button>
+                <button class="time-btn" data-range="7d">7 Days</button>
+                <button class="time-btn" data-range="24h">24 Hours</button>
+              </div>
+
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-analytics" style="padding: 7px 14px; font-size:12px; height: 34px;">
+                <i class="fa-solid fa-rotate-right"></i> Refresh
               </button>
             </div>
+          </div>
 
-            <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); margin-bottom:0;">
-              <div class="stat-card" style="background:rgba(59,130,246,0.08); border-color:rgba(59,130,246,0.2);">
-                <div class="stat-val" id="metric-firestore-reads" style="color:#60a5fa;">0</div>
-                <span class="stat-label" style="color:#93c5fd;"><i class="fa-solid fa-book-open"></i> Firestore Reads</span>
+          <!-- Executive Top Key Performance Indicators (KPI Tiles) -->
+          <div class="kpi-grid">
+
+            <!-- KPI 1: Media Catalog -->
+            <div class="kpi-tile kpi-purple">
+              <div class="kpi-top">
+                <span class="kpi-label"><i class="fa-solid fa-images"></i> Media Catalog</span>
+                <span class="kpi-trend positive" id="kpi-catalog-trend"><i class="fa-solid fa-arrow-trend-up"></i> Active</span>
               </div>
-              <div class="stat-card" style="background:rgba(168,85,247,0.08); border-color:rgba(168,85,247,0.2);">
-                <div class="stat-val" id="metric-firestore-writes" style="color:#c084fc;">0</div>
-                <span class="stat-label" style="color:#e9d5ff;"><i class="fa-solid fa-pen-to-square"></i> Firestore Writes</span>
+              <div class="kpi-main">
+                <div class="kpi-val" id="stat-total">0</div>
+                <div class="kpi-sub" id="kpi-catalog-sub">0 MB estimated payload</div>
               </div>
-              <div class="stat-card" style="background:rgba(239,68,68,0.08); border-color:rgba(239,68,68,0.2);">
-                <div class="stat-val" id="metric-firestore-deletes" style="color:#f87171;">0</div>
-                <span class="stat-label" style="color:#fca5a5;"><i class="fa-solid fa-trash-can"></i> Firestore Deletes</span>
+              <div class="kpi-footer">
+                <span><i class="fa-solid fa-upload"></i> Public: <strong id="kpi-public-cnt">0</strong></span>
+                <span><div class="stat-val" id="stat-review-pending" style="display:none;">0</div><div class="stat-val" id="stat-review-done" style="display:none;">0</div><i class="fa-solid fa-user-shield"></i> Admin: <strong id="kpi-admin-cnt">0</strong></span>
               </div>
-              <div class="stat-card" style="background:rgba(16,185,129,0.08); border-color:rgba(16,185,129,0.2);">
-                <div class="stat-val" id="metric-ram-saved-reads" style="color:#34d399;">0</div>
-                <span class="stat-label" style="color:#a7f3d0;"><i class="fa-solid fa-bolt"></i> Saved Reads (RAM)</span>
+            </div>
+
+            <!-- KPI 2: Moderation & SLA -->
+            <div class="kpi-tile kpi-blue">
+              <div class="kpi-top">
+                <span class="kpi-label"><i class="fa-solid fa-list-check"></i> Queue & SLA</span>
+                <span class="kpi-badge" id="kpi-approval-rate-badge">0% Approved</span>
               </div>
-              <div class="stat-card" style="background:rgba(245,158,11,0.08); border-color:rgba(245,158,11,0.2);">
-                <div class="stat-val" id="metric-cache-efficiency" style="color:#fbbf24;">100%</div>
-                <span class="stat-label" style="color:#fde68a;"><i class="fa-solid fa-gauge-high"></i> RAM Efficiency</span>
+              <div class="kpi-main">
+                <div class="kpi-val-group">
+                  <span class="kpi-val text-pending" id="stat-pending" style="color:#fbbf24;">0</span>
+                  <span class="kpi-val-sub">Pending Review</span>
+                </div>
               </div>
+              <div class="kpi-footer">
+                <span style="color:#34d399;"><i class="fa-solid fa-circle-check"></i> <strong id="stat-approved">0</strong> Approved</span>
+                <span style="color:#f87171;"><i class="fa-solid fa-circle-xmark"></i> <strong id="stat-rejected">0</strong> Rejected</span>
+              </div>
+            </div>
+
+            <!-- KPI 3: AI Face Intelligence -->
+            <div class="kpi-tile kpi-emerald">
+              <div class="kpi-top">
+                <span class="kpi-label"><i class="fa-solid fa-face-viewfinder"></i> AI Face Index</span>
+                <span class="kpi-badge" id="kpi-face-coverage-badge" style="background:rgba(16,185,129,0.15); color:#34d399; border-color:rgba(16,185,129,0.3);">0% Index</span>
+              </div>
+              <div class="kpi-main">
+                <div class="kpi-val" id="kpi-total-faces">0</div>
+                <div class="kpi-sub">Total Descriptors Extracted</div>
+              </div>
+              <div class="kpi-footer">
+                <span><i class="fa-solid fa-user"></i> Single: <strong id="kpi-single-face">0</strong></span>
+                <span><i class="fa-solid fa-users"></i> Group: <strong id="kpi-multi-face">0</strong></span>
+                <span style="color:#fbbf24;"><i class="fa-solid fa-user-slash"></i> No Face: <strong id="stat-no-face">0</strong></span>
+              </div>
+            </div>
+
+            <!-- Hidden placeholders for metric IDs to preserve background script compatibility -->
+            <span id="metric-firestore-reads" style="display:none;">0</span>
+            <span id="metric-firestore-writes" style="display:none;">0</span>
+            <span id="metric-firestore-deletes" style="display:none;">0</span>
+            <span id="metric-ram-saved-reads" style="display:none;">0</span>
+            <span id="metric-cache-efficiency" style="display:none;">100%</span>
+            <span id="metric-cache-efficiency-badge" style="display:none;">100%</span>
+
+          </div>
+
+          <!-- Power BI Analytics Visual Charts Grid -->
+          <div class="powerbi-grid">
+
+            <!-- Visual 1: Photo Ingestion & Moderation Analytics Trend (Line/Area Chart) -->
+            <div class="pbi-card pbi-wide">
+              <div class="pbi-card-header">
+                <div>
+                  <div class="pbi-card-title"><i class="fa-solid fa-chart-area" style="color:#8b5cf6;"></i> Media Ingestion & Moderation Flow</div>
+                  <div class="pbi-card-sub">Daily upload volume, approval rates, and moderation timeline</div>
+                </div>
+                <div class="pbi-card-stats">
+                  <span class="badge badge-approved" id="pbi-ingestion-total-badge">0 Media Items</span>
+                </div>
+              </div>
+              <div class="pbi-chart-box">
+                <canvas id="chart-ingestion-trend"></canvas>
+              </div>
+            </div>
+
+            <!-- Visual 2: AI Face Recognition Breakdown (Doughnut Chart) -->
+            <div class="pbi-card">
+              <div class="pbi-card-header">
+                <div>
+                  <div class="pbi-card-title"><i class="fa-solid fa-chart-pie" style="color:#3b82f6;"></i> AI Face Indexing Profile</div>
+                  <div class="pbi-card-sub">Face detection coverage & group photo breakdown</div>
+                </div>
+              </div>
+              <div class="pbi-chart-box">
+                <canvas id="chart-face-distribution"></canvas>
+              </div>
+            </div>
+
+            <!-- Visual 3: Event-Wise Media Distribution (Horizontal Bar Chart) -->
+            <div class="pbi-card">
+              <div class="pbi-card-header">
+                <div>
+                  <div class="pbi-card-title"><i class="fa-solid fa-chart-bar" style="color:#f59e0b;"></i> Event Catalog & Media Volume</div>
+                  <div class="pbi-card-sub">Photo distribution and face index load per event</div>
+                </div>
+                <div class="pbi-card-stats">
+                  <span class="badge" style="background:rgba(245,158,11,0.15); color:#fbbf24;" id="pbi-event-count-badge">0 Events</span>
+                </div>
+              </div>
+              <div class="pbi-chart-box">
+                <canvas id="chart-event-distribution"></canvas>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Live Operations Audit Stream -->
+          <div class="pbi-card" style="margin-top:10px;">
+            <div class="pbi-card-header">
+              <div>
+                <div class="pbi-card-title"><i class="fa-solid fa-clock-rotate-left" style="color:#ec4899;"></i> Operational Audit Log & Activity Stream</div>
+                <div class="pbi-card-sub">Real-time log of uploads, moderation updates, face extraction & cache events</div>
+              </div>
+              <button class="btn btn-secondary btn-sm" id="btn-clear-audit-logs" style="font-size:11px; padding:4px 10px;">
+                <i class="fa-solid fa-broom"></i> Clear View
+              </button>
+            </div>
+            <div class="audit-log-container">
+              <table class="audit-log-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Operation / Event</th>
+                    <th>Target Media / Event ID</th>
+                    <th>Operator / Source</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-log-tbody">
+                  <!-- Dynamic Audit Logs -->
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <!-- Quick Nav Cards -->
-          <div style="display:grid; grid-template-columns: repeat(auto-fill,minmax(200px,1fr)); gap:14px;">
-            <div class="dash-card" style="cursor:pointer;" onclick="navigateTo('moderation')">
-              <div class="dash-card-title"><i class="fa-solid fa-list-check"></i> Photo Moderation</div>
-              <div class="dash-card-sub">Approve, reject and manage all uploaded photos</div>
-              <div class="btn btn-secondary btn-sm" style="margin-top:10px;">Open <i class="fa-solid fa-arrow-right"></i></div>
-            </div>
-            <div class="dash-card" style="cursor:pointer;" onclick="navigateTo('upload')">
-              <div class="dash-card-title"><i class="fa-solid fa-cloud-arrow-up"></i> Direct Upload</div>
-              <div class="dash-card-sub">Upload photos directly to the gallery</div>
-              <div class="btn btn-secondary btn-sm" style="margin-top:10px;">Open <i class="fa-solid fa-arrow-right"></i></div>
-            </div>
-            <div class="dash-card" style="cursor:pointer;" onclick="navigateTo('facedetection')">
-              <div class="dash-card-title"><i class="fa-solid fa-face-viewfinder"></i> Face Detection</div>
-              <div class="dash-card-sub">Control the global face detection pipeline</div>
-              <div class="btn btn-secondary btn-sm" style="margin-top:10px;">Configure <i class="fa-solid fa-arrow-right"></i></div>
-            </div>
-            <div class="dash-card" style="cursor:pointer;" onclick="navigateTo('events')">
-              <div class="dash-card-title"><i class="fa-solid fa-calendar-days"></i> Events</div>
-              <div class="dash-card-sub">Create and manage photo events</div>
-              <div class="btn btn-secondary btn-sm" style="margin-top:10px;">Open <i class="fa-solid fa-arrow-right"></i></div>
-            </div>
-          </div>
         </div>
 
         <!-- ═══════════════ PHOTO MODERATION ══════════════════ -->
@@ -1447,6 +1660,44 @@
                 <input type="range" id="logo-width-slider" min="120" max="380" step="5" value="245" style="width:100%; accent-color:#8b5cf6; cursor:pointer;">
               </div>
             </div>
+
+            <!-- Studio Profile & Location Settings Card -->
+            <div class="dash-card" style="margin-top:20px;">
+              <div class="dash-card-title"><i class="fa-solid fa-building-user"></i> Official Studio Profile & Map Location</div>
+              <div class="dash-card-sub">Customize the studio name, owner, phone/WhatsApp, and location map link displayed on the public gallery business card.</div>
+
+              <div class="form-group">
+                <label class="form-label" for="studio-name-input">Studio Name</label>
+                <input type="text" id="studio-name-input" class="form-input" placeholder="e.g. স্মৃতি চিত্র (Smriti Chitra)">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="studio-owner-input">Studio Owner Name</label>
+                <input type="text" id="studio-owner-input" class="form-input" placeholder="e.g. Subhajit Pratihar">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="studio-phone-input">Contact Phone / WhatsApp</label>
+                <input type="text" id="studio-phone-input" class="form-input" placeholder="e.g. 8388086844">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="studio-location-input">Studio Location Address</label>
+                <input type="text" id="studio-location-input" class="form-input" placeholder="e.g. Majuria, Bankura">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="studio-map-url-input">Google Maps Link or Search Query</label>
+                <input type="text" id="studio-map-url-input" class="form-input" placeholder="e.g. https://maps.google.com/?q=Majuria,Bankura">
+              </div>
+
+              <button type="button" id="save-studio-btn" class="btn btn-primary btn-sm">
+                <i class="fa-solid fa-floppy-disk"></i> Save Studio Details
+              </button>
+              <div id="studio-saved-indicator" style="display:none; margin-top:8px; font-size:12px; color:#34d399;">
+                <i class="fa-solid fa-circle-check"></i> Studio details saved successfully!
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1474,6 +1725,120 @@
               </form>
             </div>
           </div>
+        </div>
+
+        <!-- ═══════════════ FIRESTORE & RAM CACHE TELEMETRY ══════════════════ -->
+        <div class="content-section" id="section-firestore">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:20px;">
+            <div>
+              <h1 class="section-title" style="margin-bottom:4px;">
+                <i class="fa-solid fa-fire-flame-curved" style="color:#f97316; font-size:22px; margin-right:8px;"></i>
+                Firestore Operations & RAM Cache Telemetry
+              </h1>
+              <p class="section-subtitle">Real-time monitoring of Firestore database reads, writes, deletes, and RAM cache saved operations.</p>
+            </div>
+            <button class="btn btn-primary btn-sm" id="btn-refresh-firestore-section" style="padding:8px 16px; font-size:12px;">
+              <i class="fa-solid fa-rotate-right"></i> Refresh Telemetry
+            </button>
+          </div>
+
+          <!-- Stats Tiles -->
+          <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom:22px;">
+            <div class="kpi-tile kpi-blue">
+              <div class="kpi-top">
+                <span class="kpi-label"><i class="fa-solid fa-book-open"></i> Firestore Reads</span>
+                <span class="kpi-badge">Direct API</span>
+              </div>
+              <div class="kpi-main">
+                <div class="kpi-val" id="metric-firestore-reads-detail" style="color:#60a5fa;">0</div>
+                <div class="kpi-sub">Total database document read requests</div>
+              </div>
+            </div>
+
+            <div class="kpi-tile kpi-purple">
+              <div class="kpi-top">
+                <span class="kpi-label"><i class="fa-solid fa-pen-to-square"></i> Firestore Writes</span>
+                <span class="kpi-badge">Mutations</span>
+              </div>
+              <div class="kpi-main">
+                <div class="kpi-val" id="metric-firestore-writes-detail" style="color:#c084fc;">0</div>
+                <div class="kpi-sub">Document creates and updates</div>
+              </div>
+            </div>
+
+            <div class="kpi-tile" style="border-top: 3px solid #ef4444;">
+              <div class="kpi-top">
+                <span class="kpi-label"><i class="fa-solid fa-trash-can"></i> Firestore Deletes</span>
+                <span class="kpi-badge" style="background:rgba(239,68,68,0.15); color:#f87171;">Removals</span>
+              </div>
+              <div class="kpi-main">
+                <div class="kpi-val" id="metric-firestore-deletes-detail" style="color:#f87171;">0</div>
+                <div class="kpi-sub">Document deletions</div>
+              </div>
+            </div>
+
+            <div class="kpi-tile kpi-emerald">
+              <div class="kpi-top">
+                <span class="kpi-label"><i class="fa-solid fa-bolt"></i> Saved Reads (RAM)</span>
+                <span class="kpi-trend positive"><i class="fa-solid fa-shield-halved"></i> Cost Saved</span>
+              </div>
+              <div class="kpi-main">
+                <div class="kpi-val" id="metric-ram-saved-reads-detail" style="color:#34d399;">0</div>
+                <div class="kpi-sub">Reads served instantly from RAM</div>
+              </div>
+            </div>
+
+            <div class="kpi-tile kpi-amber">
+              <div class="kpi-top">
+                <span class="kpi-label"><i class="fa-solid fa-gauge-high"></i> RAM Efficiency</span>
+                <span class="kpi-badge" style="background:rgba(245,158,11,0.15); color:#fbbf24;">Hit Rate</span>
+              </div>
+              <div class="kpi-main">
+                <div class="kpi-val" id="metric-cache-efficiency-detail" style="color:#fbbf24;">100%</div>
+                <div class="kpi-sub">Cache hit efficiency ratio</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Deep Telemetry Visual Charts -->
+          <div class="powerbi-grid">
+            <div class="pbi-card pbi-wide">
+              <div class="pbi-card-header">
+                <div>
+                  <div class="pbi-card-title"><i class="fa-solid fa-chart-column" style="color:#f97316;"></i> Operations Breakdown & Cache Optimization</div>
+                  <div class="pbi-card-sub">Comparison of Direct Database Operations vs In-Memory RAM Cache Hits</div>
+                </div>
+              </div>
+              <div class="pbi-chart-box" style="height:320px;">
+                <canvas id="chart-firestore-detail"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Architecture & Cost Savings Info Card -->
+          <div class="dash-card" style="margin-top:20px; background: linear-gradient(135deg, rgba(249,115,22,0.06), rgba(139,92,246,0.05)); border:1px solid rgba(249,115,22,0.25);">
+            <div class="dash-card-title" style="font-size:16px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <i class="fa-solid fa-server" style="color:#f97316;"></i> Firestore In-Memory RAM Caching Engine
+            </div>
+            <p style="font-size:13px; color:#cbd5e1; line-height:1.6; margin-bottom:12px;">
+              FaceMatch AI incorporates an active server-side RAM caching layer for gallery photos and event descriptors. Whenever a guest searches by face or loads gallery items, queries are served directly from high-speed Node.js memory instead of invoking paid Firestore read quotas.
+            </p>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; font-size:12px; color:#94a3b8;">
+              <div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:8px;">
+                <strong style="color:#34d399; display:block; margin-bottom:2px;"><i class="fa-solid fa-bolt"></i> Zero-Latency Reads</strong>
+                RAM cache hits respond in &lt; 5ms compared to 200ms cloud network round-trips.
+              </div>
+              <div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:8px;">
+                <strong style="color:#60a5fa; display:block; margin-bottom:2px;"><i class="fa-solid fa-piggy-bank"></i> Billing Protection</strong>
+                Prevents bill spikes during large public events with thousands of concurrent guest searches.
+              </div>
+              <div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:8px;">
+                <strong style="color:#c084fc; display:block; margin-bottom:2px;"><i class="fa-solid fa-rotate"></i> Auto-Invalidation</strong>
+                Cache automatically flushes and updates whenever admin approves, rejects, or uploads photos.
+              </div>
+            </div>
+          </div>
+
         </div>
 
       </div><!-- /admin-content -->

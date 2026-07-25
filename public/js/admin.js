@@ -70,7 +70,8 @@ const SECTION_TITLES = {
   'gallery-settings': 'Gallery Settings',
   storage:          'Storage & Drive',
   branding:         'Branding',
-  security:         'Security'
+  security:         'Security',
+  firestore:        'Firestore & RAM Cache'
 };
 
 window.navigateTo = function(sectionId) {
@@ -288,6 +289,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupEventManagement();
   setupManualFaceEvents();
 
+  // Initialize Power BI Executive Dashboard Controls & Visuals
+  setupPowerBITimePicker();
+  initPowerBICharts();
+
   // Preload face-api models for face detection on upload
   loadFaceApiModels().catch(err => console.warn('Failed to preload face-api models:', err));
 
@@ -466,6 +471,19 @@ async function loadDashboardData() {
         galleryHeadingInput.value = settingsRes.settings.publicGalleryHeading || 'Gallery Catalog';
       }
 
+      // Populate Studio Profile inputs
+      const sNameInput = document.getElementById('studio-name-input');
+      const sOwnerInput = document.getElementById('studio-owner-input');
+      const sPhoneInput = document.getElementById('studio-phone-input');
+      const sLocInput = document.getElementById('studio-location-input');
+      const sMapUrlInput = document.getElementById('studio-map-url-input');
+
+      if (sNameInput) sNameInput.value = settingsRes.settings.studioName || 'স্মৃতি চিত্র (Smriti Chitra)';
+      if (sOwnerInput) sOwnerInput.value = settingsRes.settings.studioOwner || 'Subhajit Pratihar';
+      if (sPhoneInput) sPhoneInput.value = settingsRes.settings.studioPhone || '8388086844';
+      if (sLocInput) sLocInput.value = settingsRes.settings.studioLocation || 'Majuria, Bankura';
+      if (sMapUrlInput) sMapUrlInput.value = settingsRes.settings.studioMapUrl || 'https://maps.google.com/?q=Majuria,Bankura';
+
       // Update Google Drive controls & connection badges
       const statusBadge = document.getElementById('gdrive-status-badge');
       const connectedContainer = document.getElementById('gdrive-connected-container');
@@ -552,6 +570,7 @@ async function fetchFirebaseMetrics() {
     const res = await adminFetch('/api/admin/metrics');
     if (res && res.success && res.metrics) {
       const m = res.metrics;
+      window.latestMetrics = m;
       const readsEl = document.getElementById('metric-firestore-reads');
       const writesEl = document.getElementById('metric-firestore-writes');
       const deletesEl = document.getElementById('metric-firestore-deletes');
@@ -563,6 +582,21 @@ async function fetchFirebaseMetrics() {
       if (deletesEl) deletesEl.textContent = Number(m.firestoreDeletes || 0).toLocaleString();
       if (ramSavedEl) ramSavedEl.textContent = Number(m.ramCacheHits || 0).toLocaleString();
       if (effEl) effEl.textContent = m.efficiency || '100%';
+
+      // Update dedicated firestore detail section metrics
+      const readsDet = document.getElementById('metric-firestore-reads-detail');
+      const writesDet = document.getElementById('metric-firestore-writes-detail');
+      const deletesDet = document.getElementById('metric-firestore-deletes-detail');
+      const ramSavedDet = document.getElementById('metric-ram-saved-reads-detail');
+      const effDet = document.getElementById('metric-cache-efficiency-detail');
+
+      if (readsDet) readsDet.textContent = Number(m.firestoreReads || 0).toLocaleString();
+      if (writesDet) writesDet.textContent = Number(m.firestoreWrites || 0).toLocaleString();
+      if (deletesDet) deletesDet.textContent = Number(m.firestoreDeletes || 0).toLocaleString();
+      if (ramSavedDet) ramSavedDet.textContent = Number(m.ramCacheHits || 0).toLocaleString();
+      if (effDet) effDet.textContent = m.efficiency || '100%';
+
+      updateExecutiveCharts(window.allPhotos || [], window.allEvents || [], m);
     }
   } catch (err) {
     console.warn("Could not load Firebase metrics:", err.message);
@@ -599,10 +633,413 @@ function updateFaceDetectionStatusUI(enabled) {
   }
 }
 
+// ==========================================================================
+// POWER BI EXECUTIVE DASHBOARD ANALYTICS & CHARTS
+// ==========================================================================
+
+window.pbiTimeRange = 'all';
+window.latestMetrics = null;
+window.pbiAuditLogs = [
+  { time: new Date().toLocaleTimeString(), op: 'Dashboard Initialized', target: 'Telemetry Engine', user: 'System', status: 'Active' },
+  { time: new Date().toLocaleTimeString(), op: 'Metrics Hydrated', target: 'RAM Cache Tracker', user: 'System', status: 'Success' }
+];
+
+let pbiCharts = {
+  ingestion: null,
+  faceDist: null,
+  cachePerf: null,
+  eventDist: null,
+  firestoreDetail: null
+};
+
+function logAuditAction(op, target, user = 'Admin', status = 'Success') {
+  const time = new Date().toLocaleTimeString();
+  window.pbiAuditLogs.unshift({ time, op, target, user, status });
+  if (window.pbiAuditLogs.length > 30) window.pbiAuditLogs.pop();
+  renderAuditLogs();
+}
+
+function renderAuditLogs() {
+  const tbody = document.getElementById('audit-log-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = window.pbiAuditLogs.map(log => `
+    <tr>
+      <td style="color:#94a3b8; font-size:12px;"><i class="fa-regular fa-clock" style="margin-right:4px;"></i>${log.time}</td>
+      <td style="font-weight:600; color:#e2e8f0;">${log.op}</td>
+      <td style="font-family:monospace; color:#a7f3d0; font-size:12px;">${log.target}</td>
+      <td><span class="badge" style="background:rgba(139,92,246,0.15); color:#c084fc; font-size:11px;">${log.user}</span></td>
+      <td><span class="badge badge-approved" style="font-size:10px;">${log.status}</span></td>
+    </tr>
+  `).join('');
+}
+
+function setupPowerBITimePicker() {
+  const container = document.getElementById('pbi-time-picker');
+  if (!container) return;
+  container.querySelectorAll('.time-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      container.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      window.pbiTimeRange = btn.getAttribute('data-range');
+      updateStatsAndRender();
+      logAuditAction('Time Filter Applied', `Range: ${window.pbiTimeRange.toUpperCase()}`, 'Operator');
+    });
+  });
+
+  const refreshBtn = document.getElementById('btn-refresh-analytics');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.innerHTML = '<i class="fa-solid fa-rotate-right fa-spin"></i> Syncing...';
+      await loadDashboardData();
+      logAuditAction('Manual Data Sync', 'Full Catalog & Metrics', 'Operator');
+      setTimeout(() => {
+        refreshBtn.innerHTML = '<i class="fa-solid fa-rotate-right"></i> Refresh';
+        toastSuccess('Dashboard Refreshed', 'Power BI metrics updated from telemetry.');
+      }, 500);
+    });
+  }
+
+  const refreshFirestoreBtn = document.getElementById('btn-refresh-firestore-section');
+  if (refreshFirestoreBtn) {
+    refreshFirestoreBtn.addEventListener('click', async () => {
+      refreshFirestoreBtn.innerHTML = '<i class="fa-solid fa-rotate-right fa-spin"></i> Refreshing...';
+      await fetchFirebaseMetrics();
+      setTimeout(() => {
+        refreshFirestoreBtn.innerHTML = '<i class="fa-solid fa-rotate-right"></i> Refresh Telemetry';
+        toastSuccess('Telemetry Updated', 'Firestore operations and RAM cache stats re-synchronized.');
+      }, 500);
+    });
+  }
+
+  const clearLogBtn = document.getElementById('btn-clear-audit-logs');
+  if (clearLogBtn) {
+    clearLogBtn.addEventListener('click', () => {
+      window.pbiAuditLogs = [{ time: new Date().toLocaleTimeString(), op: 'Audit Log Cleared', target: 'Local View', user: 'Admin', status: 'Cleared' }];
+      renderAuditLogs();
+    });
+  }
+}
+
+function initPowerBICharts() {
+  if (typeof Chart === 'undefined') {
+    setTimeout(initPowerBICharts, 300);
+    return;
+  }
+
+  // Set global chart defaults for executive dark mode
+  Chart.defaults.color = '#94a3b8';
+  Chart.defaults.font.family = "'Inter', sans-serif";
+
+  // Visual 1: Ingestion Trend (Area Chart - Vibrant Electric Cyan, Emerald & Crimson)
+  const ctxIng = document.getElementById('chart-ingestion-trend');
+  if (ctxIng && !pbiCharts.ingestion) {
+    pbiCharts.ingestion = new Chart(ctxIng, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Total Uploads',
+            data: [],
+            borderColor: '#06b6d4',
+            backgroundColor: 'rgba(6, 182, 212, 0.2)',
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2.5
+          },
+          {
+            label: 'Approved',
+            data: [],
+            borderColor: '#10b981',
+            backgroundColor: 'rgba(16, 185, 129, 0.25)',
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2.5
+          },
+          {
+            label: 'Rejected',
+            data: [],
+            borderColor: '#f43f5e',
+            backgroundColor: 'rgba(244, 63, 94, 0.12)',
+            fill: false,
+            tension: 0.4,
+            borderWidth: 2
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top', labels: { boxWidth: 12, usePointStyle: true } }
+        },
+        scales: {
+          x: { grid: { color: 'rgba(255, 255, 255, 0.04)' } },
+          y: { grid: { color: 'rgba(255, 255, 255, 0.04)' }, beginAtZero: true }
+        }
+      }
+    });
+  }
+
+  // Visual 2: AI Face Distribution (Doughnut Chart - Vibrant Purple, Cyan & Amber)
+  const ctxFace = document.getElementById('chart-face-distribution');
+  if (ctxFace && !pbiCharts.faceDist) {
+    pbiCharts.faceDist = new Chart(ctxFace, {
+      type: 'doughnut',
+      data: {
+        labels: ['Single Face', 'Group / Multi-Face', 'No Face Data'],
+        datasets: [{
+          data: [0, 0, 0],
+          backgroundColor: ['#a855f7', '#06b6d4', '#f59e0b'],
+          borderColor: '#0f172a',
+          borderWidth: 3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { boxWidth: 12, usePointStyle: true } }
+        },
+        cutout: '70%'
+      }
+    });
+  }
+
+  // Visual 3: Cache Performance (Bar Chart - Sky Blue, Pink Violet, Crimson Red, Electric Emerald)
+  const ctxCache = document.getElementById('chart-cache-performance');
+  if (ctxCache && !pbiCharts.cachePerf) {
+    pbiCharts.cachePerf = new Chart(ctxCache, {
+      type: 'bar',
+      data: {
+        labels: ['Reads', 'Writes', 'Deletes', 'RAM Saved Reads'],
+        datasets: [{
+          label: 'Operation Count',
+          data: [0, 0, 0, 0],
+          backgroundColor: ['#38bdf8', '#ec4899', '#f43f5e', '#10b981'],
+          borderRadius: 8
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        },
+        scales: {
+          x: { grid: { display: false } },
+          y: { grid: { color: 'rgba(255, 255, 255, 0.04)' }, beginAtZero: true }
+        }
+      }
+    });
+  }
+
+  // Visual 4: Event Media Distribution (Bar Chart - Distinct Multi-color Palette)
+  const ctxEvent = document.getElementById('chart-event-distribution');
+  if (ctxEvent && !pbiCharts.eventDist) {
+    pbiCharts.eventDist = new Chart(ctxEvent, {
+      type: 'bar',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Photo Count',
+          data: [],
+          backgroundColor: ['#8b5cf6', '#06b6d4', '#f43f5e', '#10b981', '#f59e0b', '#a855f7', '#ec4899', '#3b82f6'],
+          borderRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        },
+        scales: {
+          x: { grid: { display: false } },
+          y: {
+            grid: { color: 'rgba(255, 255, 255, 0.04)' },
+            beginAtZero: true,
+            ticks: { precision: 0 }
+          }
+        }
+      }
+    });
+  }
+
+  // Visual 5: Firestore Section Detail Chart
+  const ctxFirestoreDetail = document.getElementById('chart-firestore-detail');
+  if (ctxFirestoreDetail && !pbiCharts.firestoreDetail) {
+    pbiCharts.firestoreDetail = new Chart(ctxFirestoreDetail, {
+      type: 'bar',
+      data: {
+        labels: ['Firestore Reads', 'Firestore Writes', 'Firestore Deletes', 'RAM Saved Reads'],
+        datasets: [{
+          label: 'Telemetry Count',
+          data: [0, 0, 0, 0],
+          backgroundColor: ['#38bdf8', '#c084fc', '#f87171', '#34d399'],
+          borderRadius: 8
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        },
+        scales: {
+          x: { grid: { display: false } },
+          y: { grid: { color: 'rgba(255, 255, 255, 0.04)' }, beginAtZero: true }
+        }
+      }
+    });
+  }
+}
+
+function updateExecutiveCharts(photos, events, metrics) {
+  if (!pbiCharts.ingestion) initPowerBICharts();
+  if (!pbiCharts.ingestion) return;
+
+  // 1. Ingestion Trend Data
+  const dateMap = {};
+  const now = new Date();
+
+  // Sort photos by timestamp ascending
+  const sorted = [...photos].sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+
+  sorted.forEach(p => {
+    const d = new Date(p.timestamp || Date.now());
+    const dateStr = d.toISOString().split('T')[0]; // YYYY-MM-DD
+    if (!dateMap[dateStr]) {
+      dateMap[dateStr] = { total: 0, approved: 0, rejected: 0 };
+    }
+    dateMap[dateStr].total++;
+    if (p.status === 'approved') dateMap[dateStr].approved++;
+    if (p.status === 'rejected') dateMap[dateStr].rejected++;
+  });
+
+  const dates = Object.keys(dateMap);
+  if (dates.length === 0) {
+    dates.push(now.toISOString().split('T')[0]);
+    dateMap[dates[0]] = { total: photos.length, approved: photos.filter(p => p.status === 'approved').length, rejected: photos.filter(p => p.status === 'rejected').length };
+  }
+
+  pbiCharts.ingestion.data.labels = dates.slice(-14);
+  pbiCharts.ingestion.data.datasets[0].data = dates.slice(-14).map(d => dateMap[d].total);
+  pbiCharts.ingestion.data.datasets[1].data = dates.slice(-14).map(d => dateMap[d].approved);
+  pbiCharts.ingestion.data.datasets[2].data = dates.slice(-14).map(d => dateMap[d].rejected);
+  pbiCharts.ingestion.update();
+
+  const totalBadge = document.getElementById('pbi-ingestion-total-badge');
+  if (totalBadge) totalBadge.innerText = `${photos.length} Media Items`;
+
+  // 2. Face Distribution
+  const singleFace = photos.filter(p => p.descriptors && p.descriptors.length === 1).length;
+  const multiFace = photos.filter(p => p.descriptors && p.descriptors.length > 1).length;
+  const noFace = photos.filter(p => !p.descriptors || p.descriptors.length === 0).length;
+
+  pbiCharts.faceDist.data.datasets[0].data = [singleFace, multiFace, noFace];
+  pbiCharts.faceDist.update();
+
+  const kpiTotalFaces = document.getElementById('kpi-total-faces');
+  const totalDescriptors = photos.reduce((acc, p) => acc + (p.descriptors ? p.descriptors.length : 0), 0);
+  if (kpiTotalFaces) kpiTotalFaces.innerText = totalDescriptors.toLocaleString();
+
+  const kpiSingle = document.getElementById('kpi-single-face');
+  if (kpiSingle) kpiSingle.innerText = singleFace.toLocaleString();
+
+  const kpiMulti = document.getElementById('kpi-multi-face');
+  if (kpiMulti) kpiMulti.innerText = multiFace.toLocaleString();
+
+  const coverageBadge = document.getElementById('kpi-face-coverage-badge');
+  const coveragePct = photos.length > 0 ? (((photos.length - noFace) / photos.length) * 100).toFixed(1) : 0;
+  if (coverageBadge) coverageBadge.innerText = `${coveragePct}% Indexed`;
+
+  // 3. Cache & Infrastructure Performance
+  if (metrics) {
+    const reads = Number(metrics.firestoreReads || 0);
+    const writes = Number(metrics.firestoreWrites || 0);
+    const deletes = Number(metrics.firestoreDeletes || 0);
+    const ramSaved = Number(metrics.ramCacheHits || 0);
+
+    if (pbiCharts.cachePerf) {
+      pbiCharts.cachePerf.data.datasets[0].data = [reads, writes, deletes, ramSaved];
+      pbiCharts.cachePerf.update();
+    }
+
+    if (pbiCharts.firestoreDetail) {
+      pbiCharts.firestoreDetail.data.datasets[0].data = [reads, writes, deletes, ramSaved];
+      pbiCharts.firestoreDetail.update();
+    }
+
+    const effBadge = document.getElementById('metric-cache-efficiency-badge');
+    if (effBadge) effBadge.innerText = `${metrics.efficiency || '100%'} RAM Saved`;
+  }
+
+  // 4. Event Distribution
+  const eventMap = {};
+  
+  // First, pre-fill registered active events from events list
+  (events || []).forEach(e => {
+    if (e.id && e.id !== 'all') {
+      const title = e.title || e.name || e.id;
+      eventMap[title] = 0;
+    }
+  });
+
+  // Next, map photos to event titles
+  (photos || []).forEach(p => {
+    const evId = p.eventId || 'Unassigned';
+    const found = (events || []).find(e => e.id === evId);
+    const title = found ? (found.title || found.name || evId) : (evId === 'all' ? 'All Events' : (evId === 'Unassigned' ? 'Unassigned' : evId));
+    eventMap[title] = (eventMap[title] || 0) + 1;
+  });
+
+  const eventLabels = Object.keys(eventMap);
+  const eventValues = Object.values(eventMap);
+
+  pbiCharts.eventDist.data.labels = eventLabels.slice(0, 8);
+  pbiCharts.eventDist.data.datasets[0].data = eventValues.slice(0, 8);
+  pbiCharts.eventDist.update();
+
+  const eventBadge = document.getElementById('pbi-event-count-badge');
+  if (eventBadge) eventBadge.innerText = `${(events || []).length} Active Events`;
+
+  // Update Media Catalog Payload size estimation
+  const kpiSub = document.getElementById('kpi-catalog-sub');
+  const estMb = (photos.length * 1.85).toFixed(1); // avg ~1.85MB per photo estimate
+  if (kpiSub) kpiSub.innerText = `~${estMb} MB estimated payload`;
+
+  // Approval Rate KPI Badge
+  const approvalRateBadge = document.getElementById('kpi-approval-rate-badge');
+  const appCount = photos.filter(p => p.status === 'approved').length;
+  const appPct = photos.length > 0 ? ((appCount / photos.length) * 100).toFixed(1) : 0;
+  if (approvalRateBadge) approvalRateBadge.innerText = `${appPct}% Approved`;
+
+  // Render audit log
+  renderAuditLogs();
+}
+
 function updateStatsAndRender() {
-  let photos = window.allPhotos;
+  let photos = window.allPhotos || [];
+
+  // Apply Time Range Filter if active
+  if (window.pbiTimeRange && window.pbiTimeRange !== 'all') {
+    const now = Date.now();
+    let msCutoff = 0;
+    if (window.pbiTimeRange === '24h') msCutoff = 24 * 60 * 60 * 1000;
+    else if (window.pbiTimeRange === '7d') msCutoff = 7 * 24 * 60 * 60 * 1000;
+    else if (window.pbiTimeRange === '30d') msCutoff = 30 * 24 * 60 * 60 * 1000;
+
+    if (msCutoff > 0) {
+      photos = photos.filter(p => {
+        const t = new Date(p.timestamp || 0).getTime();
+        return (now - t) <= msCutoff;
+      });
+    }
+  }
+
   if (window.adminActiveEventId && window.adminActiveEventId !== 'all') {
-    photos = window.allPhotos.filter(p => p.eventId === window.adminActiveEventId);
+    photos = photos.filter(p => p.eventId === window.adminActiveEventId);
   }
 
   const totalCount = photos.length;
@@ -616,18 +1053,32 @@ function updateStatsAndRender() {
   const reviewPendingCount = photos.filter(p => p.reviewed !== true).length;
 
   // Render stats counters
-  document.getElementById('stat-total').innerText = totalCount;
-  document.getElementById('stat-pending').innerText = pendingCount;
-  document.getElementById('stat-approved').innerText = approvedCount;
-  document.getElementById('stat-rejected').innerText = rejectedCount;
+  const totalEl = document.getElementById('stat-total');
+  if (totalEl) totalEl.innerText = totalCount.toLocaleString();
+
+  const pendingEl = document.getElementById('stat-pending');
+  if (pendingEl) pendingEl.innerText = pendingCount.toLocaleString();
+
+  const approvedEl = document.getElementById('stat-approved');
+  if (approvedEl) approvedEl.innerText = approvedCount.toLocaleString();
+
+  const rejectedEl = document.getElementById('stat-rejected');
+  if (rejectedEl) rejectedEl.innerText = rejectedCount.toLocaleString();
+
   const noFaceEl = document.getElementById('stat-no-face');
-  if (noFaceEl) noFaceEl.innerText = noFaceCount;
+  if (noFaceEl) noFaceEl.innerText = noFaceCount.toLocaleString();
+
+  const pubCntEl = document.getElementById('kpi-public-cnt');
+  if (pubCntEl) pubCntEl.innerText = publicUploadCount.toLocaleString();
+
+  const adminCntEl = document.getElementById('kpi-admin-cnt');
+  if (adminCntEl) adminCntEl.innerText = adminUploadCount.toLocaleString();
 
   const reviewDoneEl = document.getElementById('stat-review-done');
-  if (reviewDoneEl) reviewDoneEl.innerText = reviewDoneCount;
+  if (reviewDoneEl) reviewDoneEl.innerText = reviewDoneCount.toLocaleString();
 
   const reviewPendingEl = document.getElementById('stat-review-pending');
-  if (reviewPendingEl) reviewPendingEl.innerText = reviewPendingCount;
+  if (reviewPendingEl) reviewPendingEl.innerText = reviewPendingCount.toLocaleString();
 
   // Render Tab Badges
   const badgePending = document.getElementById('badge-pending-count');
@@ -653,6 +1104,9 @@ function updateStatsAndRender() {
     noFaceBadgeEl.innerText = noFaceCount;
     noFaceBadgeEl.style.display = noFaceCount > 0 ? 'inline-block' : 'none';
   }
+
+  // Update Power BI Charts & Analytics
+  updateExecutiveCharts(photos, window.allEvents, window.latestMetrics);
 
   renderModerationTable();
 }
@@ -1232,7 +1686,7 @@ function setupSettingsEvents() {
     });
   }
 
-  // â”€â”€ Google Drive Sync â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // —————————————————————————————————————————— Google Drive Sync ——————————————————————————————————————————
   const gdriveSyncBtn = document.getElementById('gdrive-sync-btn');
   if (gdriveSyncBtn) {
     gdriveSyncBtn.addEventListener('click', async () => {

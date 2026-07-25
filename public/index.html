@@ -131,8 +131,8 @@
               <div class="business-card-badge"><i class="fa-solid fa-gem"></i> Official Studio</div>
               <div class="business-card-header">
                 <i class="fa-solid fa-camera-retro business-icon"></i>
-                <div>
-                  <h4 class="business-title">স্মৃতি চিত্র (Smriti Chitra)</h4>
+                <div class="business-title-group">
+                  <h4 class="business-title" id="studio-title">স্মৃতি চিত্র (Smriti Chitra)</h4>
                   <span class="business-sub">Photography & Videography</span>
                 </div>
               </div>
@@ -140,16 +140,18 @@
                 <i class="fa-solid fa-heart" style="color:#ec4899;"></i> আপনাদের মিষ্টি মুহূর্তগুলোকে ফ্রেমবন্দী করতে আমাদের সাথে যোগাযোগ করুন।
               </p>
               <div class="business-contact-grid">
-                <a href="https://wa.me/918388086844" target="_blank" rel="noopener" class="contact-pill whatsapp-pill">
+                <a href="https://wa.me/918388086844" id="studio-whatsapp-link" target="_blank" rel="noopener" class="contact-pill whatsapp-pill">
                   <i class="fa-brands fa-whatsapp"></i> WhatsApp
                 </a>
-                <a href="tel:8388086844" class="contact-pill phone-pill">
-                  <i class="fa-solid fa-phone"></i> 8388086844
+                <a href="tel:8388086844" id="studio-phone-link" class="contact-pill phone-pill">
+                  <i class="fa-solid fa-phone"></i> <span id="studio-phone-text">8388086844</span>
                 </a>
               </div>
               <div class="business-footer-meta">
-                <span><i class="fa-solid fa-user-tie"></i> Owner: <strong>Subhajit Pratihar</strong></span>
-                <span><i class="fa-solid fa-location-dot"></i> Majuria, Bankura</span>
+                <span><i class="fa-solid fa-user-tie"></i> Owner: <strong id="studio-owner">Subhajit Pratihar</strong></span>
+                <a href="https://maps.google.com/?q=Majuria,Bankura" id="studio-map-link" target="_blank" rel="noopener" class="location-pill-link" title="Open Studio Location on Google Maps">
+                  <i class="fa-solid fa-location-dot" style="color:#ec4899;"></i> <span id="studio-location-text">Majuria, Bankura</span>
+                </a>
               </div>
             </div>
           </div>
@@ -163,7 +165,7 @@
                   <p>Browse through <span id="gallery-total-count">0</span> uploaded photo(s)</p>
                 </div>
                 <div class="gallery-controls" style="display: flex; gap: 8px; align-items: center;">
-                  <button class="btn btn-secondary btn-sm" id="gallery-select-mode-btn">
+                  <button class="btn btn-secondary btn-sm" id="gallery-select-mode-btn" style="display: none;">
                     <i class="fa-solid fa-list-check"></i> Select Photos
                   </button>
                   <button class="btn-icon" id="refresh-gallery-btn" title="Refresh Gallery">

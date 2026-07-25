@@ -965,7 +965,12 @@ app.get('/api/gallery', async (req, res) => {
       allowPublicFaceAdjustment: settings.allowPublicFaceAdjustment !== false,
       logoWidth: settings.logoWidth,
       storageMode: getStorageMode(settings),
-      galleryMessage: (targetEvent && targetEvent.announcementMessage) || settings.galleryMessage || ''
+      galleryMessage: (targetEvent && targetEvent.announcementMessage) || settings.galleryMessage || '',
+      studioName: settings.studioName || 'স্মৃতি চিত্র (Smriti Chitra)',
+      studioOwner: settings.studioOwner || 'Subhajit Pratihar',
+      studioPhone: settings.studioPhone || '8388086844',
+      studioLocation: settings.studioLocation || 'Majuria, Bankura',
+      studioMapUrl: settings.studioMapUrl || 'https://maps.google.com/?q=Majuria,Bankura'
     });
   } catch (err) {
     console.error('Gallery endpoint error:', err);
@@ -2156,7 +2161,7 @@ app.get('/api/admin/settings', checkAdminAuth, async (req, res) => {
 });
 
 app.post('/api/admin/settings', checkAdminAuth, async (req, res) => {
-  const { publicGalleryEnabled, publicGalleryHeading, defaultPublicEventId, allowPublicFaceAdjustment, faceDetectionEnabled, newPassword, logoWidth, photoRetentionHours, googleClientId, googleClientSecret, galleryMessage } = req.body;
+  const { publicGalleryEnabled, publicGalleryHeading, defaultPublicEventId, allowPublicFaceAdjustment, faceDetectionEnabled, newPassword, logoWidth, photoRetentionHours, googleClientId, googleClientSecret, galleryMessage, studioName, studioOwner, studioPhone, studioLocation, studioMapUrl } = req.body;
   const settings = await readSettings();
 
   if (publicGalleryEnabled !== undefined) settings.publicGalleryEnabled = !!publicGalleryEnabled;
@@ -2178,6 +2183,11 @@ app.post('/api/admin/settings', checkAdminAuth, async (req, res) => {
   if (galleryMessage !== undefined) {
     settings.galleryMessage = galleryMessage;
   }
+  if (studioName !== undefined) settings.studioName = studioName.toString().trim();
+  if (studioOwner !== undefined) settings.studioOwner = studioOwner.toString().trim();
+  if (studioPhone !== undefined) settings.studioPhone = studioPhone.toString().trim();
+  if (studioLocation !== undefined) settings.studioLocation = studioLocation.toString().trim();
+  if (studioMapUrl !== undefined) settings.studioMapUrl = studioMapUrl.toString().trim();
 
   try {
     invalidateSettingsCache();
