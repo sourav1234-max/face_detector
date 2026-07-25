@@ -542,21 +542,30 @@ async function createAdminSessionToken() {
 
 function setAdminSessionCookie(res, token, req) {
   const isHttps = req ? ((req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https' || req.protocol === 'https' || req.secure) : false;
+  const sameSiteAttr = isHttps ? 'SameSite=None; Secure' : 'SameSite=Lax';
   res.setHeader(
     'Set-Cookie',
-    `admin_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.floor(ADMIN_SESSION_TTL_MS / 1000)}${isHttps ? '; Secure' : ''}`
+    `admin_session=${token}; HttpOnly; Path=/; ${sameSiteAttr}; Max-Age=${Math.floor(ADMIN_SESSION_TTL_MS / 1000)}`
   );
 }
 
 function clearAdminSessionCookie(res, req) {
   const isHttps = req ? ((req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https' || req.protocol === 'https' || req.secure) : false;
+  const sameSiteAttr = isHttps ? 'SameSite=None; Secure' : 'SameSite=Lax';
   res.setHeader(
     'Set-Cookie',
-    `admin_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${isHttps ? '; Secure' : ''}`
+    `admin_session=; HttpOnly; Path=/; ${sameSiteAttr}; Max-Age=0`
   );
 }
 
 function getAdminSessionToken(req) {
+  const authHeader = req.headers['authorization'] || req.headers['x-admin-token'];
+  if (authHeader) {
+    if (authHeader.startsWith('Bearer ')) {
+      return authHeader.substring(7).trim();
+    }
+    return authHeader.trim();
+  }
   return parseCookies(req).admin_session || null;
 }
 
@@ -2300,7 +2309,7 @@ app.post('/api/admin/login', async (req, res) => {
   if (inputPass && inputPass === expectedPass) {
     const token = await createAdminSessionToken();
     setAdminSessionCookie(res, token, req);
-    res.json({ success: true });
+    res.json({ success: true, token: token });
   } else {
     res.status(401).json({ success: false, error: 'Invalid password' });
   }

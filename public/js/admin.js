@@ -250,9 +250,14 @@ function getPhotoUrl(filename, storageUrl, imageUrl) {
 // --- Helper AJAX function with Auth Header & Dual Backend Support ---
 async function adminFetch(url, options = {}) {
   options.credentials = options.credentials || 'include';
-  options.headers = {
-    ...options.headers
-  };
+  const headers = { ...options.headers };
+  const token = typeof sessionStorage !== 'undefined'
+    ? sessionStorage.getItem('admin_token')
+    : (typeof localStorage !== 'undefined' ? localStorage.getItem('admin_token') : null);
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  options.headers = headers;
 
   let response;
   try {
@@ -336,7 +341,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     navigateTo('storage');
   }
 
-  // Check if we are already logged in through a session cookie
+  // Check if we are already logged in through a session cookie or token
   checkExistingAdminSession();
 });
 
@@ -368,6 +373,12 @@ async function verifyPasswordAndLoad(password) {
 
     const result = await response.json().catch(() => ({}));
     if (response.ok && result.success) {
+      if (result.token) {
+        try {
+          sessionStorage.setItem('admin_token', result.token);
+          localStorage.setItem('admin_token', result.token);
+        } catch (e) {}
+      }
       showAuthOverlay(false);
       await loadDashboardData();
     } else {
@@ -383,9 +394,16 @@ async function verifyPasswordAndLoad(password) {
 async function checkExistingAdminSession() {
   try {
     const fetchFn = (window.BackendManager && window.BackendManager.fetch) ? window.BackendManager.fetch : fetch;
+    const headers = {};
+    const token = typeof sessionStorage !== 'undefined'
+      ? sessionStorage.getItem('admin_token')
+      : (typeof localStorage !== 'undefined' ? localStorage.getItem('admin_token') : null);
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     const response = await fetchFn('/api/admin/session-check', {
       method: 'GET',
-      credentials: 'include'
+      credentials: 'include',
+      headers
     });
 
     if (response.ok) {
@@ -430,7 +448,9 @@ function showAuthError(message) {
 async function logoutAdmin() {
   if (confirm("Are you sure you want to log out from the Admin Dashboard?")) {
     try {
-      await fetch('/api/admin/logout', { method: 'POST', credentials: 'same-origin' });
+      sessionStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_token');
+      await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
     } catch (err) {
       console.error("Logout error:", err);
     }

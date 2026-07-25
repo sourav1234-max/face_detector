@@ -188,6 +188,13 @@
     }
     headersObj['X-Request-ID'] = reqId;
 
+    const token = typeof sessionStorage !== 'undefined'
+      ? sessionStorage.getItem('admin_token')
+      : (typeof localStorage !== 'undefined' ? localStorage.getItem('admin_token') : null);
+    if (token && !headersObj['Authorization']) {
+      headersObj['Authorization'] = `Bearer ${token}`;
+    }
+
     const requestOptions = {
       ...options,
       headers: headersObj
