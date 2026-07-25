@@ -540,19 +540,19 @@ async function createAdminSessionToken() {
   return `${payload}.${sig}`;
 }
 
-function setAdminSessionCookie(res, token) {
-  const isProduction = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
+function setAdminSessionCookie(res, token, req) {
+  const isHttps = req ? ((req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https' || req.protocol === 'https' || req.secure) : false;
   res.setHeader(
     'Set-Cookie',
-    `admin_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.floor(ADMIN_SESSION_TTL_MS / 1000)}${isProduction ? '; Secure' : ''}`
+    `admin_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.floor(ADMIN_SESSION_TTL_MS / 1000)}${isHttps ? '; Secure' : ''}`
   );
 }
 
-function clearAdminSessionCookie(res) {
-  const isProduction = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
+function clearAdminSessionCookie(res, req) {
+  const isHttps = req ? ((req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https' || req.protocol === 'https' || req.secure) : false;
   res.setHeader(
     'Set-Cookie',
-    `admin_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${isProduction ? '; Secure' : ''}`
+    `admin_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${isHttps ? '; Secure' : ''}`
   );
 }
 
@@ -2292,11 +2292,14 @@ app.post('/api/admin/sync', checkAdminAuth, async (req, res) => {
 // --- Admin APIs ---
 
 app.post('/api/admin/login', async (req, res) => {
-  const { password } = req.body;
+  const { password } = req.body || {};
   const settings = await readSettings();
-  if (password === settings.adminPassword) {
+  const inputPass = (password || '').toString().trim();
+  const expectedPass = (settings.adminPassword || 'admin123').toString().trim();
+
+  if (inputPass && inputPass === expectedPass) {
     const token = await createAdminSessionToken();
-    setAdminSessionCookie(res, token);
+    setAdminSessionCookie(res, token, req);
     res.json({ success: true });
   } else {
     res.status(401).json({ success: false, error: 'Invalid password' });
@@ -2309,7 +2312,7 @@ app.get('/api/admin/session-check', async (req, res) => {
 });
 
 app.post('/api/admin/logout', (req, res) => {
-  clearAdminSessionCookie(res);
+  clearAdminSessionCookie(res, req);
   res.json({ success: true });
 });
 

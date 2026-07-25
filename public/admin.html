@@ -1869,7 +1869,7 @@
               </h3>
               <span class="badge" id="ha-current-routing-badge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); font-size:11px; padding:4px 10px;">Routing: Railway Primary</span>
             </div>
-            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:16px;">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:16px;">
               <div>
                 <label class="form-label" style="font-size:12px;">Active Backend Routing Mode</label>
                 <select id="ha-mode-select" class="form-input" style="background:rgba(15,23,42,0.9);">
@@ -1882,8 +1882,12 @@
                 <label class="form-label" style="font-size:12px;">Automatic Failover Policy</label>
                 <div class="check-row" style="padding:10px 14px;">
                   <input type="checkbox" id="ha-autofailover-toggle" checked>
-                  <label for="ha-autofailover-toggle" style="font-size:13px; font-weight:600; color:#fff;">Enable Automatic Failover on Timeout / 5xx</label>
+                  <label for="ha-autofailover-toggle" style="font-size:13px; font-weight:600; color:#fff;">Enable Failover on Timeout / 5xx</label>
                 </div>
+              </div>
+              <div>
+                <label class="form-label" style="font-size:12px;">Railway Primary URL (Optional)</label>
+                <input type="url" id="ha-railway-url-input" class="form-input" placeholder="https://your-app.up.railway.app">
               </div>
               <div>
                 <label class="form-label" style="font-size:12px;">Render Backup URL (Optional)</label>

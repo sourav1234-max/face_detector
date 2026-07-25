@@ -3341,6 +3341,7 @@ function setupHABackendControls() {
   const cfg = window.BackendManager.getConfig();
   const modeSelect = document.getElementById('ha-mode-select');
   const failoverToggle = document.getElementById('ha-autofailover-toggle');
+  const railwayInput = document.getElementById('ha-railway-url-input');
   const renderInput = document.getElementById('ha-render-url-input');
 
   if (modeSelect) {
@@ -3357,6 +3358,14 @@ function setupHABackendControls() {
     failoverToggle.addEventListener('change', (e) => {
       window.BackendManager.updateConfig({ autoFailover: e.target.checked });
       toastInfo('Failover Policy', `Automatic failover ${e.target.checked ? 'ENABLED' : 'DISABLED'}`);
+    });
+  }
+
+  if (railwayInput) {
+    railwayInput.value = cfg.railwayUrl || '';
+    railwayInput.addEventListener('change', (e) => {
+      window.BackendManager.updateConfig({ railwayUrl: e.target.value.trim() });
+      toastSuccess('Primary URL Saved', 'Railway Primary backend URL updated.');
     });
   }
 
