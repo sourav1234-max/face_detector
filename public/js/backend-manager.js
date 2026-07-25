@@ -262,6 +262,136 @@
     }
   }
 
+  // --- Server RAM Cache Hydration Progress Overlay ---
+  let cacheOverlayPollTimer = null;
+
+  function createOverlayDom() {
+    if (document.getElementById('ram-cache-loader-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'ram-cache-loader-overlay';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(10, 15, 29, 0.96);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 999999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      transition: opacity 0.4s ease, visibility 0.4s ease;
+    `;
+
+    overlay.innerHTML = `
+      <div style="max-width: 440px; width: 90%; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 16px; padding: 32px 28px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); text-align: center;">
+        <div style="width: 64px; height: 64px; margin: 0 auto 20px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; color: #38bdf8;">
+          <i class="fa-solid fa-server fa-spin" style="--fa-animation-duration: 3s;"></i>
+        </div>
+        <div id="ram-cache-platform-badge" style="display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; tracking: 1px; color: #38bdf8; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 20px; padding: 4px 12px; margin-bottom: 12px;">
+          Initial Startup
+        </div>
+        <h3 style="font-size: 20px; font-weight: 700; margin: 0 0 8px; color: #f8fafc;">Hydrating In-Memory Cache</h3>
+        <p style="font-size: 13px; color: #94a3b8; margin: 0 0 24px; line-height: 1.5;">
+          Loading metadata, face descriptors, and catalog indexes into server RAM for zero-latency searches.
+        </p>
+
+        <!-- Progress Bar -->
+        <div style="width: 100%; height: 10px; background: rgba(255, 255, 255, 0.08); border-radius: 10px; overflow: hidden; margin-bottom: 12px; position: relative;">
+          <div id="ram-cache-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8, #c084fc); border-radius: 10px; transition: width 0.3s ease;"></div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; color: #cbd5e1; margin-bottom: 16px;">
+          <span id="ram-cache-stage-text">Connecting to database...</span>
+          <span id="ram-cache-percent-text" style="color: #38bdf8; font-size: 14px;">0%</span>
+        </div>
+
+        <div id="ram-cache-detail-sub" style="font-size: 11.5px; color: #64748b; font-family: monospace;">
+          Initializing RAM Cache Engine...
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+  }
+
+  function updateOverlay(cache, platform) {
+    createOverlayDom();
+    const progress = cache.progress || {};
+    const percent = progress.percent || (cache.isInitialized ? 100 : 0);
+    const stage = progress.stage || 'Loading metadata...';
+
+    const bar = document.getElementById('ram-cache-progress-bar');
+    const stageEl = document.getElementById('ram-cache-stage-text');
+    const percentEl = document.getElementById('ram-cache-percent-text');
+    const detailEl = document.getElementById('ram-cache-detail-sub');
+    const badgeEl = document.getElementById('ram-cache-platform-badge');
+
+    if (bar) bar.style.width = percent + '%';
+    if (stageEl) stageEl.innerText = stage;
+    if (percentEl) percentEl.innerText = percent + '%';
+    if (badgeEl && platform) badgeEl.innerText = `${platform} Backend Readying`;
+
+    if (detailEl) {
+      if (progress.loadedPhotos !== undefined) {
+        detailEl.innerText = `Photos: ${progress.loadedPhotos || 0} | Descriptors: ${progress.loadedDescriptors || 0} | Events: ${progress.loadedEvents || 0}`;
+      }
+    }
+
+    if (cache.isInitialized || percent >= 100) {
+      removeOverlay();
+    }
+  }
+
+  function removeOverlay() {
+    if (cacheOverlayPollTimer) {
+      clearInterval(cacheOverlayPollTimer);
+      cacheOverlayPollTimer = null;
+    }
+    const overlay = document.getElementById('ram-cache-loader-overlay');
+    if (overlay) {
+      overlay.style.opacity = '0';
+      overlay.style.pointerEvents = 'none';
+      setTimeout(() => {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }, 400);
+    }
+  }
+
+  async function checkCacheProgressLoop() {
+    try {
+      const res = await fetch('/api/cache/progress?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.cache) {
+          if (!data.cache.isInitialized) {
+            updateOverlay(data.cache, data.platform);
+          } else {
+            removeOverlay();
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Check progress immediately on DOM ready
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        checkCacheProgressLoop();
+        cacheOverlayPollTimer = setInterval(checkCacheProgressLoop, 400);
+      });
+    } else {
+      checkCacheProgressLoop();
+      cacheOverlayPollTimer = setInterval(checkCacheProgressLoop, 400);
+    }
+  }
+
   // Start background health ping loop
   checkHealthAll().catch(() => {});
   setInterval(() => {

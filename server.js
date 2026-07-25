@@ -87,8 +87,11 @@ app.use((req, res, next) => {
 // Cache Readiness & Blocking Middleware
 app.use((req, res, next) => {
   const reqPath = req.path;
-  // Allow health check, system status, cache progress, admin auth, and static asset files to pass through
+  // Allow health check, system status, cache progress, auth, static assets, and HTML pages to pass through
   if (
+    reqPath === '/' ||
+    reqPath === '/index.html' ||
+    reqPath === '/admin.html' ||
     reqPath === '/api/health' ||
     reqPath === '/api/system/status' ||
     reqPath === '/api/cache/progress' ||
@@ -98,7 +101,7 @@ app.use((req, res, next) => {
     reqPath.startsWith('/models') ||
     reqPath.startsWith('/js') ||
     reqPath.startsWith('/css') ||
-    /\.(css|js|png|jpg|jpeg|svg|ico|woff2|task|json|bin)$/i.test(reqPath)
+    /\.(html|css|js|png|jpg|jpeg|svg|ico|woff2|task|json|bin)$/i.test(reqPath)
   ) {
     return next();
   }
