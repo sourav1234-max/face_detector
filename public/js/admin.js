@@ -247,19 +247,23 @@ function getPhotoUrl(filename, storageUrl, imageUrl) {
   return `/uploads/${filename}`;
 }
 
-// --- Helper AJAX function with Auth Header ---
+// --- Helper AJAX function with Auth Header & Dual Backend Support ---
 async function adminFetch(url, options = {}) {
-  options.credentials = 'same-origin';
+  options.credentials = options.credentials || 'include';
   options.headers = {
     ...options.headers
   };
 
   let response;
   try {
-    response = await fetch(url, options);
+    if (window.BackendManager) {
+      response = await window.BackendManager.fetch(url, options);
+    } else {
+      response = await fetch(url, options);
+    }
   } catch (netErr) {
     console.error("Network error during admin fetch:", netErr);
-    alert("Network error: Could not reach the Node server. Please verify it is running.");
+    if (window.toastError) toastError("Network Error", "Could not reach backend server.");
     throw netErr;
   }
 
@@ -269,8 +273,8 @@ async function adminFetch(url, options = {}) {
     throw new Error('Unauthorized');
   } else if (!response.ok) {
     const errRes = await response.json().catch(() => ({}));
-    const errMsg = errRes.error || `HTTP ${response.status} error`;
-    alert("Database / Server error: " + errMsg);
+    const errMsg = errRes.error || errRes.message || `HTTP ${response.status} error`;
+    if (window.toastError) toastError("Server Error", errMsg);
     throw new Error(errMsg);
   }
 
@@ -288,6 +292,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupDirectUpload();
   setupEventManagement();
   setupManualFaceEvents();
+  setupHABackendControls();
 
   // Initialize Power BI Executive Dashboard Controls & Visuals
   setupPowerBITimePicker();
@@ -351,9 +356,10 @@ function setupAuthEvents() {
 
 async function verifyPasswordAndLoad(password) {
   try {
-    const response = await fetch('/api/admin/login', {
+    const fetchFn = (window.BackendManager && window.BackendManager.fetch) ? window.BackendManager.fetch : fetch;
+    const response = await fetchFn('/api/admin/login', {
       method: 'POST',
-      credentials: 'same-origin',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json'
       },
@@ -376,9 +382,10 @@ async function verifyPasswordAndLoad(password) {
 
 async function checkExistingAdminSession() {
   try {
-    const response = await fetch('/api/admin/session-check', {
+    const fetchFn = (window.BackendManager && window.BackendManager.fetch) ? window.BackendManager.fetch : fetch;
+    const response = await fetchFn('/api/admin/session-check', {
       method: 'GET',
-      credentials: 'same-origin'
+      credentials: 'include'
     });
 
     if (response.ok) {
@@ -3320,6 +3327,299 @@ async function handleManualFaceDelete() {
       statusBanner.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i> Error: ${err.message}`;
     }
   }
+}
+
+// ==========================================================================
+// DUAL BACKEND ARCHITECTURE & HA MONITORING DASHBOARD
+// ==========================================================================
+
+let haPollingInterval = null;
+
+function setupHABackendControls() {
+  if (!window.BackendManager) return;
+
+  const cfg = window.BackendManager.getConfig();
+  const modeSelect = document.getElementById('ha-mode-select');
+  const failoverToggle = document.getElementById('ha-autofailover-toggle');
+  const renderInput = document.getElementById('ha-render-url-input');
+
+  if (modeSelect) {
+    modeSelect.value = cfg.mode || 'auto';
+    modeSelect.addEventListener('change', (e) => {
+      window.BackendManager.updateConfig({ mode: e.target.value });
+      updateHARoutingBadge();
+      toastInfo('Routing Updated', `Active backend mode set to: ${e.target.value.toUpperCase()}`);
+    });
+  }
+
+  if (failoverToggle) {
+    failoverToggle.checked = cfg.autoFailover !== false;
+    failoverToggle.addEventListener('change', (e) => {
+      window.BackendManager.updateConfig({ autoFailover: e.target.checked });
+      toastInfo('Failover Policy', `Automatic failover ${e.target.checked ? 'ENABLED' : 'DISABLED'}`);
+    });
+  }
+
+  if (renderInput) {
+    renderInput.value = cfg.renderUrl || '';
+    renderInput.addEventListener('change', (e) => {
+      window.BackendManager.updateConfig({ renderUrl: e.target.value.trim() });
+      toastSuccess('Backup URL Saved', 'Render backup backend URL updated.');
+    });
+  }
+
+  const pingBtn = document.getElementById('ha-manual-health-btn');
+  if (pingBtn) {
+    pingBtn.addEventListener('click', async () => {
+      toastInfo('Health Check', 'Pinging Railway & Render backends...');
+      await window.BackendManager.checkHealth();
+      await updateHALiveDashboard();
+      toastSuccess('Health Check Complete', 'Updated health metrics for all backends.');
+    });
+  }
+
+  const refreshCacheBtn = document.getElementById('ha-refresh-cache-btn');
+  if (refreshCacheBtn) {
+    refreshCacheBtn.addEventListener('click', async () => {
+      try {
+        toastInfo('Refreshing Cache', 'Requesting server RAM cache re-index...');
+        const res = await adminFetch('/api/admin/cache/refresh', { method: 'POST' });
+        if (res.success) {
+          toastSuccess('Cache Refreshing', res.message);
+          setTimeout(updateHALiveDashboard, 1500);
+        }
+      } catch (err) {
+        toastError('Refresh Failed', err.message);
+      }
+    });
+  }
+
+  const syncFsBtn = document.getElementById('ha-sync-firestore-btn');
+  if (syncFsBtn) {
+    syncFsBtn.addEventListener('click', async () => {
+      try {
+        toastInfo('Firestore Sync', 'Forcing metadata re-synchronization with Firestore...');
+        const res = await adminFetch('/api/admin/cache/sync', { method: 'POST' });
+        if (res.success) {
+          toastSuccess('Sync Initiated', res.message);
+          setTimeout(updateHALiveDashboard, 1500);
+        }
+      } catch (err) {
+        toastError('Sync Failed', err.message);
+      }
+    });
+  }
+
+  const refreshLogsBtn = document.getElementById('ha-refresh-logs-btn');
+  if (refreshLogsBtn) {
+    refreshLogsBtn.addEventListener('click', () => {
+      fetchAndRenderHALogs();
+    });
+  }
+
+  const logFilter = document.getElementById('ha-log-filter');
+  if (logFilter) {
+    logFilter.addEventListener('change', () => {
+      fetchAndRenderHALogs();
+    });
+  }
+
+  window.addEventListener('backend:health-updated', updateHALiveDashboard);
+  window.addEventListener('backend:switched', updateHARoutingBadge);
+
+  updateHARoutingBadge();
+  updateHALiveDashboard();
+  fetchAndRenderHALogs();
+
+  if (!haPollingInterval) {
+    haPollingInterval = setInterval(() => {
+      updateHALiveDashboard().catch(() => {});
+    }, 4000);
+  }
+}
+
+function updateHARoutingBadge() {
+  const badge = document.getElementById('ha-current-routing-badge');
+  if (!badge || !window.BackendManager) return;
+  const stats = window.BackendManager.getStats();
+  const cfg = window.BackendManager.getConfig();
+
+  if (cfg.mode === 'railway') {
+    badge.innerText = 'Routing: Railway (Fixed)';
+    badge.style.background = 'rgba(56,189,248,0.15)';
+    badge.style.color = '#38bdf8';
+  } else if (cfg.mode === 'render') {
+    badge.innerText = 'Routing: Render (Fixed)';
+    badge.style.background = 'rgba(192,132,252,0.15)';
+    badge.style.color = '#c084fc';
+  } else {
+    const active = stats.currentActive.toUpperCase();
+    badge.innerText = `Routing: Auto (${active} Active)`;
+    badge.style.background = stats.currentActive === 'railway' ? 'rgba(56,189,248,0.15)' : 'rgba(192,132,252,0.15)';
+    badge.style.color = stats.currentActive === 'railway' ? '#38bdf8' : '#c084fc';
+  }
+}
+
+async function updateHALiveDashboard() {
+  if (!window.BackendManager) return;
+
+  const stats = window.BackendManager.getStats();
+
+  // 1. Update Railway Client Ping Stats
+  const rStats = stats.railway;
+  const rBadge = document.getElementById('ha-railway-status-badge');
+  const rLatency = document.getElementById('ha-railway-latency');
+  const rUptime = document.getElementById('ha-railway-uptime');
+
+  if (rBadge) {
+    if (rStats.status === 'online') {
+      rBadge.className = 'badge badge-approved';
+      rBadge.innerText = 'Online';
+    } else if (rStats.status === 'offline') {
+      rBadge.className = 'badge badge-rejected';
+      rBadge.innerText = 'Offline / Error';
+    } else {
+      rBadge.className = 'badge badge-pending';
+      rBadge.innerText = 'Checking...';
+    }
+  }
+  if (rLatency) rLatency.innerText = rStats.responseTimeMs > 0 ? `${rStats.responseTimeMs} ms` : '-';
+  if (rUptime) rUptime.innerText = rStats.uptimeSeconds > 0 ? formatUptime(rStats.uptimeSeconds) : '-';
+
+  // 2. Update Render Client Ping Stats
+  const rndStats = stats.render;
+  const rndBadge = document.getElementById('ha-render-status-badge');
+  const rndLatency = document.getElementById('ha-render-latency');
+  const rndUptime = document.getElementById('ha-render-uptime');
+
+  if (rndBadge) {
+    if (!rndStats.url) {
+      rndBadge.className = 'badge';
+      rndBadge.style.background = 'rgba(255,255,255,0.06)';
+      rndBadge.style.color = '#64748b';
+      rndBadge.innerText = 'Not Configured';
+    } else if (rndStats.status === 'online') {
+      rndBadge.className = 'badge badge-approved';
+      rndBadge.innerText = 'Online';
+    } else {
+      rndBadge.className = 'badge badge-rejected';
+      rndBadge.innerText = 'Offline';
+    }
+  }
+  if (rndLatency) rndLatency.innerText = rndStats.responseTimeMs > 0 ? `${rndStats.responseTimeMs} ms` : '-';
+  if (rndUptime) rndUptime.innerText = rndStats.uptimeSeconds > 0 ? formatUptime(rndStats.uptimeSeconds) : '-';
+
+  // 3. Fetch Server Detailed Status JSON
+  try {
+    const sysData = await adminFetch('/api/system/status');
+    if (sysData && sysData.success) {
+      const isRailway = sysData.platform === 'RAILWAY';
+
+      // CPU / Memory / Requests for Active Backend
+      if (isRailway) {
+        const rCpu = document.getElementById('ha-railway-cpu');
+        const rMem = document.getElementById('ha-railway-mem');
+        const rReq = document.getElementById('ha-railway-requests');
+        if (rCpu) rCpu.innerText = `${sysData.system.cpuPercent}%`;
+        if (rMem) rMem.innerText = `${sysData.system.memory.heapUsedMB} MB`;
+        if (rReq) rReq.innerText = `${sysData.system.activeRequests} active`;
+      } else {
+        const rndCpu = document.getElementById('ha-render-cpu');
+        const rndMem = document.getElementById('ha-render-mem');
+        const rndReq = document.getElementById('ha-render-requests');
+        if (rndCpu) rndCpu.innerText = `${sysData.system.cpuPercent}%`;
+        if (rndMem) rndMem.innerText = `${sysData.system.memory.heapUsedMB} MB`;
+        if (rndReq) rndReq.innerText = `${sysData.system.activeRequests} active`;
+      }
+
+      // Metadata Cache UI
+      const cStatusBadge = document.getElementById('ha-cache-status-badge');
+      const cPhotos = document.getElementById('ha-cache-photos');
+      const cDesc = document.getElementById('ha-cache-descriptors');
+      const cEvents = document.getElementById('ha-cache-events');
+      const cSize = document.getElementById('ha-cache-size');
+      const cInitTime = document.getElementById('ha-cache-inittime');
+      const cLastRefresh = document.getElementById('ha-cache-lastrefresh');
+
+      if (cStatusBadge) {
+        cStatusBadge.innerText = sysData.cache.isInitialized ? 'Ready' : 'Loading...';
+        cStatusBadge.className = sysData.cache.isInitialized ? 'badge badge-approved' : 'badge badge-pending';
+      }
+      if (cPhotos) cPhotos.innerText = (sysData.cache.totalPhotos || 0).toLocaleString();
+      if (cDesc) cDesc.innerText = (sysData.cache.totalDescriptors || 0).toLocaleString();
+      if (cEvents) cEvents.innerText = (sysData.cache.totalEvents || 0).toLocaleString();
+      if (cSize) cSize.innerText = `${sysData.cache.cacheSizeMB || 0} MB`;
+      if (cInitTime) cInitTime.innerText = `${sysData.cache.progress.initTimeMs || 0} ms`;
+      if (cLastRefresh) {
+        cLastRefresh.innerText = sysData.cache.progress.lastRefresh
+          ? new Date(sysData.cache.progress.lastRefresh).toLocaleTimeString()
+          : 'Just now';
+      }
+
+      // Firestore Stats UI
+      const fsBadge = document.getElementById('ha-firestore-status-badge');
+      const fsReads = document.getElementById('ha-fs-reads');
+      const fsWrites = document.getElementById('ha-fs-writes');
+      const fsDeletes = document.getElementById('ha-fs-deletes');
+
+      if (fsBadge) {
+        fsBadge.innerText = sysData.firestore.status;
+        fsBadge.className = sysData.firestore.status === 'Connected' ? 'badge badge-approved' : 'badge badge-pending';
+      }
+      if (fsReads) fsReads.innerText = (sysData.firestore.reads || 0).toLocaleString();
+      if (fsWrites) fsWrites.innerText = (sysData.firestore.writes || 0).toLocaleString();
+      if (fsDeletes) fsDeletes.innerText = (sysData.firestore.deletes || 0).toLocaleString();
+    }
+  } catch (err) {
+    console.warn('[HA Dashboard] Error fetching /api/system/status:', err.message);
+  }
+}
+
+async function fetchAndRenderHALogs() {
+  const tbody = document.getElementById('ha-logs-tbody');
+  if (!tbody) return;
+
+  const filterSelect = document.getElementById('ha-log-filter');
+  const filterVal = filterSelect ? filterSelect.value : '';
+
+  try {
+    const res = await adminFetch(`/api/admin/system/logs?limit=50&filter=${encodeURIComponent(filterVal)}`);
+    if (res.success && Array.isArray(res.logs)) {
+      if (res.logs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#64748b; padding:16px;">No logs recorded yet.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = res.logs.map(log => {
+        let statusBadge = '<span class="badge badge-approved" style="font-size:10px;">INFO</span>';
+        if (log.status === 'ERROR') statusBadge = '<span class="badge badge-rejected" style="font-size:10px;">ERROR</span>';
+        else if (log.status === 'WARNING') statusBadge = '<span class="badge badge-pending" style="font-size:10px;">WARN</span>';
+        else if (log.status === 'SUCCESS') statusBadge = '<span class="badge badge-approved" style="font-size:10px;">SUCCESS</span>';
+
+        const timeStr = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '-';
+        return `
+          <tr>
+            <td style="white-space:nowrap; font-size:11.5px; color:#94a3b8;">${timeStr}</td>
+            <td><strong style="color:#38bdf8;">${log.backend || 'SYS'}</strong></td>
+            <td><span style="font-size:11px; font-weight:600; color:#c4b5fd;">${log.eventType}</span></td>
+            <td>${statusBadge}</td>
+            <td style="font-size:12px; color:#e2e8f0; font-family:monospace;">${log.details}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+  } catch (err) {
+    console.warn('[HA Logs] Failed to load logs:', err.message);
+  }
+}
+
+function formatUptime(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 

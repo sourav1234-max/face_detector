@@ -817,7 +817,8 @@
             formData.append('eventId', String(this.eventId));
           }
 
-          const response = await fetch('/api/upload', {
+          const uploadFn = (window.BackendManager && window.BackendManager.fetch) ? window.BackendManager.fetch : fetch;
+          const response = await uploadFn('/api/upload', {
             method: 'POST',
             body: formData,
             signal: controller.signal

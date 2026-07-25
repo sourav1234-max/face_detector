@@ -10,6 +10,8 @@ const { execFile } = require('child_process');
 const {
   isFirebaseEnabled,
   initRamCache,
+  refreshRamCache,
+  getCacheStatus,
   getMetrics,
   readGalleryDb,
   writeGalleryDb,
@@ -32,6 +34,14 @@ const {
   getFirebaseFileStream
 } = require('./lib/store');
 const { initFirebase } = require('./lib/firebase');
+const {
+  CURRENT_PLATFORM,
+  getSystemMetrics,
+  addSystemLog,
+  getSystemLogs,
+  incrementActiveRequests,
+  decrementActiveRequests
+} = require('./lib/system-monitor');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,13 +60,62 @@ initRamCache().catch(err => {
 validateEnvironment();
 app.set('trust proxy', true);
 
-// Configure CORS for cross-origin requests between Vercel frontend and Railway backend
+// Configure CORS for cross-origin requests between Vercel frontend, Railway, and Render backends
 app.use(cors({
   origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-event-passcode', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-event-passcode', 'X-Requested-With', 'x-request-id', 'x-backend-platform']
 }));
+
+// Request ID & Platform Header Middleware
+app.use((req, res, next) => {
+  const reqId = req.headers['x-request-id'] || 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 7);
+  req.id = reqId;
+  res.setHeader('X-Request-ID', reqId);
+  res.setHeader('X-Backend-Platform', CURRENT_PLATFORM);
+
+  incrementActiveRequests();
+
+  res.on('finish', () => {
+    decrementActiveRequests();
+  });
+
+  next();
+});
+
+// Cache Readiness & Blocking Middleware
+app.use((req, res, next) => {
+  const reqPath = req.path;
+  // Allow health check, system status, cache progress, admin auth, and static asset files to pass through
+  if (
+    reqPath === '/api/health' ||
+    reqPath === '/api/system/status' ||
+    reqPath === '/api/cache/progress' ||
+    reqPath === '/api/admin/login' ||
+    reqPath === '/api/admin/session-check' ||
+    reqPath === '/api/admin/logout' ||
+    reqPath.startsWith('/models') ||
+    reqPath.startsWith('/js') ||
+    reqPath.startsWith('/css') ||
+    /\.(css|js|png|jpg|jpeg|svg|ico|woff2|task|json|bin)$/i.test(reqPath)
+  ) {
+    return next();
+  }
+
+  const cacheStatus = getCacheStatus();
+  if (!cacheStatus.isInitialized) {
+    return res.status(503).json({
+      success: false,
+      loading: true,
+      message: 'Server is initializing metadata into RAM cache. Please wait...',
+      progress: cacheStatus.progress,
+      platform: CURRENT_PLATFORM
+    });
+  }
+
+  next();
+});
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -113,6 +172,117 @@ function getGoogleRedirectUri(req) {
   }
   return `${getPublicBaseUrl(req)}/api/google/callback`;
 }
+
+// --- High-Availability & Telemetry API Endpoints ---
+
+app.get('/api/health', (req, res) => {
+  const cacheStatus = getCacheStatus();
+  res.json({
+    status: 'ok',
+    platform: CURRENT_PLATFORM,
+    uptimeSeconds: Math.floor(process.uptime()),
+    cacheInitialized: cacheStatus.isInitialized,
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/api/cache/progress', (req, res) => {
+  const cacheStatus = getCacheStatus();
+  res.json({
+    success: true,
+    platform: CURRENT_PLATFORM,
+    cache: cacheStatus
+  });
+});
+
+app.get('/api/system/status', async (req, res) => {
+  const systemMetrics = getSystemMetrics();
+  const cacheStatus = getCacheStatus();
+  const opMetrics = getMetrics();
+  const isFirebase = isFirebaseEnabled();
+
+  let driveConnected = false;
+  try {
+    const settings = await readSettings();
+    driveConnected = !!settings.googleRefreshToken;
+  } catch (err) {}
+
+  res.json({
+    success: true,
+    platform: CURRENT_PLATFORM,
+    system: systemMetrics,
+    cache: cacheStatus,
+    firestore: {
+      status: isFirebase ? 'Connected' : 'Disconnected',
+      reads: opMetrics.firestoreReads,
+      writes: opMetrics.firestoreWrites,
+      deletes: opMetrics.firestoreDeletes,
+      totalPhotos: cacheStatus.totalPhotos,
+      totalEvents: cacheStatus.totalEvents
+    },
+    googleDrive: {
+      status: driveConnected ? 'Connected' : 'Disconnected',
+      totalUploaded: opMetrics.driveMetrics ? opMetrics.driveMetrics.totalUploaded : 0,
+      totalFailures: opMetrics.driveMetrics ? opMetrics.driveMetrics.totalFailures : 0,
+      lastUploadTime: opMetrics.driveMetrics ? opMetrics.driveMetrics.lastUploadTime : null
+    }
+  });
+});
+
+app.post('/api/admin/cache/refresh', async (req, res) => {
+  if (!(await isValidAdminSession(req))) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  try {
+    addSystemLog({
+      backend: CURRENT_PLATFORM,
+      eventType: 'CACHE',
+      status: 'INFO',
+      details: 'Manual RAM cache refresh triggered by administrator.'
+    });
+    await refreshRamCache();
+    res.json({ success: true, message: 'Metadata RAM cache refreshed successfully.' });
+  } catch (err) {
+    addSystemLog({
+      backend: CURRENT_PLATFORM,
+      eventType: 'CACHE',
+      status: 'ERROR',
+      details: `Manual RAM cache refresh failed: ${err.message}`
+    });
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admin/cache/sync', async (req, res) => {
+  if (!(await isValidAdminSession(req))) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  try {
+    addSystemLog({
+      backend: CURRENT_PLATFORM,
+      eventType: 'FIRESTORE',
+      status: 'INFO',
+      details: 'Manual Firestore metadata synchronization initiated by admin.'
+    });
+    await refreshRamCache();
+    res.json({ success: true, message: 'Metadata re-synchronized with Firestore database.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/admin/system/logs', async (req, res) => {
+  if (!(await isValidAdminSession(req))) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  const limit = parseInt(req.query.limit, 10) || 50;
+  const filter = req.query.filter || null;
+  const logs = getSystemLogs(limit, filter);
+  res.json({ success: true, logs });
+});
 
 function validateEnvironment() {
   const required = [];

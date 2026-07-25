@@ -984,6 +984,10 @@
           <i class="fa-solid fa-fire-flame-curved nav-icon" style="color:#f97316;"></i>
           <span class="nav-text">Firestore & RAM Cache</span>
         </div>
+        <div class="nav-item" data-section="ha-backend" id="nav-ha-backend">
+          <i class="fa-solid fa-server nav-icon" style="color:#38bdf8;"></i>
+          <span class="nav-text">Dual Backend & HA</span>
+        </div>
       </nav>
 
       <div class="sidebar-footer">
@@ -1841,6 +1845,163 @@
 
         </div>
 
+        <!-- ══════════════════════════════════════════════════════
+             DUAL BACKEND & HA MONITORING SECTION
+        ══════════════════════════════════════════════════════ -->
+        <div class="content-section" id="section-ha-backend">
+          <div class="executive-header">
+            <div>
+              <h2 class="executive-title"><i class="fa-solid fa-server" style="color:#38bdf8;"></i> Dual Backend Architecture & HA Monitoring</h2>
+              <div class="pbi-card-sub">Real-time status, health metrics, cache inspection, and failover management for Railway & Render</div>
+            </div>
+            <div class="executive-controls">
+              <button class="btn btn-secondary btn-sm" id="ha-manual-health-btn"><i class="fa-solid fa-heart-pulse"></i> Ping Health</button>
+              <button class="btn btn-secondary btn-sm" id="ha-refresh-cache-btn"><i class="fa-solid fa-arrows-rotate"></i> Refresh Cache</button>
+              <button class="btn btn-primary btn-sm" id="ha-sync-firestore-btn"><i class="fa-solid fa-rotate"></i> Force Sync Firestore</button>
+            </div>
+          </div>
+
+          <!-- HA Control Panel -->
+          <div class="dash-card" style="margin-top:20px; margin-bottom:20px; background: rgba(14,20,36,0.9); border: 1px solid rgba(56,189,248,0.25);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+              <h3 style="font-size:16px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
+                <i class="fa-solid fa-sliders" style="color:#38bdf8;"></i> Backend Routing & Failover Controls
+              </h3>
+              <span class="badge" id="ha-current-routing-badge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); font-size:11px; padding:4px 10px;">Routing: Railway Primary</span>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:16px;">
+              <div>
+                <label class="form-label" style="font-size:12px;">Active Backend Routing Mode</label>
+                <select id="ha-mode-select" class="form-input" style="background:rgba(15,23,42,0.9);">
+                  <option value="auto">Auto (Railway Primary, Render Fallback)</option>
+                  <option value="railway">Railway Only (Primary)</option>
+                  <option value="render">Render Only (Backup)</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label" style="font-size:12px;">Automatic Failover Policy</label>
+                <div class="check-row" style="padding:10px 14px;">
+                  <input type="checkbox" id="ha-autofailover-toggle" checked>
+                  <label for="ha-autofailover-toggle" style="font-size:13px; font-weight:600; color:#fff;">Enable Automatic Failover on Timeout / 5xx</label>
+                </div>
+              </div>
+              <div>
+                <label class="form-label" style="font-size:12px;">Render Backup URL (Optional)</label>
+                <input type="url" id="ha-render-url-input" class="form-input" placeholder="https://your-backup.onrender.com">
+              </div>
+            </div>
+          </div>
+
+          <!-- Backend Monitoring Cards Grid -->
+          <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-bottom:20px;">
+            <!-- Railway Card -->
+            <div class="kpi-tile" style="border-top:3px solid #38bdf8;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <span style="font-size:14px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
+                  <i class="fa-solid fa-train" style="color:#38bdf8;"></i> Railway Primary
+                </span>
+                <span class="badge" id="ha-railway-status-badge" style="background:rgba(52,211,153,0.2); color:#34d399; font-size:10px;">Checking...</span>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px;">
+                <div><span style="color:#64748b;">Response Time:</span> <strong id="ha-railway-latency" style="color:#fff;">-</strong></div>
+                <div><span style="color:#64748b;">Uptime:</span> <strong id="ha-railway-uptime" style="color:#fff;">-</strong></div>
+                <div><span style="color:#64748b;">CPU Usage:</span> <strong id="ha-railway-cpu" style="color:#fff;">-</strong></div>
+                <div><span style="color:#64748b;">RAM Memory:</span> <strong id="ha-railway-mem" style="color:#fff;">-</strong></div>
+                <div><span style="color:#64748b;">Active Requests:</span> <strong id="ha-railway-requests" style="color:#fff;">-</strong></div>
+                <div><span style="color:#64748b;">Role:</span> <strong style="color:#38bdf8;">Primary Backend</strong></div>
+              </div>
+            </div>
+
+            <!-- Render Card -->
+            <div class="kpi-tile" style="border-top:3px solid #c084fc;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <span style="font-size:14px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
+                  <i class="fa-solid fa-cloud" style="color:#c084fc;"></i> Render Backup
+                </span>
+                <span class="badge" id="ha-render-status-badge" style="background:rgba(248,113,113,0.2); color:#f87171; font-size:10px;">Not Configured</span>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px;">
+                <div><span style="color:#64748b;">Response Time:</span> <strong id="ha-render-latency" style="color:#fff;">-</strong></div>
+                <div><span style="color:#64748b;">Uptime:</span> <strong id="ha-render-uptime" style="color:#fff;">-</strong></div>
+                <div><span style="color:#64748b;">CPU Usage:</span> <strong id="ha-render-cpu" style="color:#fff;">-</strong></div>
+                <div><span style="color:#64748b;">RAM Memory:</span> <strong id="ha-render-mem" style="color:#fff;">-</strong></div>
+                <div><span style="color:#64748b;">Active Requests:</span> <strong id="ha-render-requests" style="color:#fff;">-</strong></div>
+                <div><span style="color:#64748b;">Role:</span> <strong style="color:#c084fc;">Secondary Backup</strong></div>
+              </div>
+            </div>
+
+            <!-- Metadata Cache Card -->
+            <div class="kpi-tile" style="border-top:3px solid #34d399;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <span style="font-size:14px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
+                  <i class="fa-solid fa-memory" style="color:#34d399;"></i> Metadata RAM Cache
+                </span>
+                <span class="badge" id="ha-cache-status-badge" style="background:rgba(52,211,153,0.2); color:#34d399; font-size:10px;">Ready</span>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px;">
+                <div><span style="color:#64748b;">Cached Photos:</span> <strong id="ha-cache-photos" style="color:#fff;">0</strong></div>
+                <div><span style="color:#64748b;">Face Descriptors:</span> <strong id="ha-cache-descriptors" style="color:#fff;">0</strong></div>
+                <div><span style="color:#64748b;">Cached Events:</span> <strong id="ha-cache-events" style="color:#fff;">0</strong></div>
+                <div><span style="color:#64748b;">Cache Size:</span> <strong id="ha-cache-size" style="color:#fff;">0 MB</strong></div>
+                <div><span style="color:#64748b;">Init Time:</span> <strong id="ha-cache-inittime" style="color:#fff;">0 ms</strong></div>
+                <div><span style="color:#64748b;">Last Refresh:</span> <strong id="ha-cache-lastrefresh" style="color:#fff;">Just now</strong></div>
+              </div>
+            </div>
+
+            <!-- Firestore Card -->
+            <div class="kpi-tile" style="border-top:3px solid #f97316;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <span style="font-size:14px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
+                  <i class="fa-solid fa-fire-flame-curved" style="color:#f97316;"></i> Firestore Source of Truth
+                </span>
+                <span class="badge" id="ha-firestore-status-badge" style="background:rgba(52,211,153,0.2); color:#34d399; font-size:10px;">Connected</span>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px;">
+                <div><span style="color:#64748b;">Firestore Reads:</span> <strong id="ha-fs-reads" style="color:#fff;">0</strong></div>
+                <div><span style="color:#64748b;">Firestore Writes:</span> <strong id="ha-fs-writes" style="color:#fff;">0</strong></div>
+                <div><span style="color:#64748b;">Firestore Deletes:</span> <strong id="ha-fs-deletes" style="color:#fff;">0</strong></div>
+                <div><span style="color:#64748b;">Sync Status:</span> <strong style="color:#34d399;">Synchronized</strong></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live System Audit & Event Log Table -->
+          <div class="dash-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+              <h3 style="font-size:15px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
+                <i class="fa-solid fa-list-ul" style="color:#38bdf8;"></i> HA System & Failover Log Stream
+              </h3>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <select id="ha-log-filter" class="form-input" style="padding:6px 10px; font-size:12px; width:auto; background:rgba(15,23,42,0.9);">
+                  <option value="">All Event Types</option>
+                  <option value="STARTUP">STARTUP</option>
+                  <option value="CACHE">CACHE</option>
+                  <option value="FIRESTORE">FIRESTORE</option>
+                  <option value="FAILOVER">FAILOVER</option>
+                  <option value="ERROR">ERROR</option>
+                </select>
+                <button class="btn btn-secondary btn-sm" id="ha-refresh-logs-btn"><i class="fa-solid fa-arrows-rotate"></i> Refresh Logs</button>
+              </div>
+            </div>
+            <div class="audit-log-container" style="max-height:350px;">
+              <table class="audit-log-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Backend</th>
+                    <th>Event Type</th>
+                    <th>Status</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="ha-logs-tbody">
+                  <tr><td colspan="5" style="text-align:center; color:#64748b; padding:20px;">Loading logs...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
       </div><!-- /admin-content -->
 
       <!-- Footer -->
@@ -2040,6 +2201,7 @@
     </div>
   </div>
 
+  <script src="js/backend-manager.js?v=1.0.0"></script>
   <script src="js/face-api.js"></script>
   <script src="js/face-detector-utils.js?v=1.0.3"></script>
   <script src="js/admin.js?v=2.0.0"></script>

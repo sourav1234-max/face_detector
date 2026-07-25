@@ -103,7 +103,8 @@ async function fetchGallery() {
       ? `?eventId=${encodeURIComponent(window.selectedEventId)}`
       : '';
 
-    const response = await fetch('/api/gallery' + queryStr, { headers });
+    const fetchFn = (window.BackendManager && window.BackendManager.fetch) ? window.BackendManager.fetch : fetch;
+    const response = await fetchFn('/api/gallery' + queryStr, { headers });
     const result = await response.json();
 
     if (result.success) {
@@ -996,7 +997,8 @@ async function detectFacesOnServer(fileOrBase64) {
     formData.append('photo', resizedFile);
   }
 
-  const response = await fetch('/api/detect-faces', {
+  const fetchFn = (window.BackendManager && window.BackendManager.fetch) ? window.BackendManager.fetch : fetch;
+  const response = await fetchFn('/api/detect-faces', {
     method: 'POST',
     body: formData
   });
