@@ -96,9 +96,17 @@
     const stats = backendStats[backendKey];
     stats.url = baseUrl;
 
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      stats.status = 'offline';
+      stats.error = 'Browser network is offline';
+      notifyListeners('backend:health-updated', { backend: backendKey, stats });
+      return stats;
+    }
+
     if (!baseUrl) {
       stats.status = 'offline';
       stats.error = 'URL not configured';
+      notifyListeners('backend:health-updated', { backend: backendKey, stats });
       return stats;
     }
 
@@ -392,6 +400,87 @@
     }
   }
 
+  // --- Floating Network Status Toast Notification ---
+  let networkToastTimer = null;
+
+  function showNetworkToast(isOnline, message) {
+    if (typeof document === 'undefined') return;
+    let toast = document.getElementById('ha-network-status-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'ha-network-status-toast';
+      toast.style.cssText = `
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        z-index: 99999;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 18px;
+        border-radius: 30px;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s ease;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(20px);
+      `;
+      document.body.appendChild(toast);
+    }
+
+    if (networkToastTimer) {
+      clearTimeout(networkToastTimer);
+      networkToastTimer = null;
+    }
+
+    if (isOnline) {
+      toast.style.background = 'rgba(16, 185, 129, 0.92)';
+      toast.style.color = '#ffffff';
+      toast.style.border = '1px solid rgba(52, 211, 153, 0.5)';
+      toast.innerHTML = `<i class="fa-solid fa-wifi" style="font-size:14px;"></i> <span>${message || 'Network Reconnected — Online'}</span>`;
+    } else {
+      toast.style.background = 'rgba(239, 68, 68, 0.94)';
+      toast.style.color = '#ffffff';
+      toast.style.border = '1px solid rgba(248, 113, 113, 0.5)';
+      toast.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="font-size:14px;"></i> <span>${message || 'Internet Disconnected — Offline'}</span>`;
+    }
+
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0)';
+
+    if (isOnline) {
+      networkToastTimer = setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(20px)';
+      }, 4000);
+    }
+  }
+
+  // Handle Browser Online/Offline Events
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => {
+      console.log('[BackendManager] Browser back online. Immediate health re-ping triggered.');
+      showNetworkToast(true, 'Connection Restored — Online');
+      checkHealthAll();
+      notifyListeners('backend:network-status', { online: true });
+    });
+
+    window.addEventListener('offline', () => {
+      console.warn('[BackendManager] Browser network connection lost (Offline).');
+      showNetworkToast(false, 'Network Offline — Check Internet');
+      backendStats.railway.status = 'offline';
+      backendStats.railway.error = 'Browser network offline';
+      backendStats.render.status = 'offline';
+      backendStats.render.error = 'Browser network offline';
+      notifyListeners('backend:health-updated', { backend: 'railway', stats: backendStats.railway });
+      notifyListeners('backend:health-updated', { backend: 'render', stats: backendStats.render });
+      notifyListeners('backend:network-status', { online: false });
+    });
+  }
+
   // Start background health ping loop
   checkHealthAll().catch(() => {});
   setInterval(() => {
@@ -408,6 +497,7 @@
       return { ...config };
     },
     getStats: () => ({ ...backendStats }),
+    isOnline: () => typeof navigator !== 'undefined' ? navigator.onLine : true,
     checkHealth: checkHealthAll,
     fetch: haFetch
   };

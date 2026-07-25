@@ -3475,12 +3475,15 @@ async function updateHALiveDashboard() {
     if (rStats.status === 'online') {
       rBadge.className = 'badge badge-approved';
       rBadge.innerText = 'Online';
+      rBadge.title = `Health Ping OK (${rStats.responseTimeMs}ms)`;
     } else if (rStats.status === 'offline') {
       rBadge.className = 'badge badge-rejected';
       rBadge.innerText = 'Offline / Error';
+      rBadge.title = rStats.error ? `Error: ${rStats.error}` : 'Backend health check failed';
     } else {
       rBadge.className = 'badge badge-pending';
       rBadge.innerText = 'Checking...';
+      rBadge.title = 'Pinging health status...';
     }
   }
   if (rLatency) rLatency.innerText = rStats.responseTimeMs > 0 ? `${rStats.responseTimeMs} ms` : '-';
@@ -3498,12 +3501,15 @@ async function updateHALiveDashboard() {
       rndBadge.style.background = 'rgba(255,255,255,0.06)';
       rndBadge.style.color = '#64748b';
       rndBadge.innerText = 'Not Configured';
+      rndBadge.title = 'Render backup URL is not specified in settings';
     } else if (rndStats.status === 'online') {
       rndBadge.className = 'badge badge-approved';
       rndBadge.innerText = 'Online';
+      rndBadge.title = `Health Ping OK (${rndStats.responseTimeMs}ms)`;
     } else {
       rndBadge.className = 'badge badge-rejected';
       rndBadge.innerText = 'Offline';
+      rndBadge.title = rndStats.error ? `Error: ${rndStats.error}` : 'Backup server ping failed';
     }
   }
   if (rndLatency) rndLatency.innerText = rndStats.responseTimeMs > 0 ? `${rndStats.responseTimeMs} ms` : '-';
@@ -3513,10 +3519,10 @@ async function updateHALiveDashboard() {
   try {
     const sysData = await adminFetch('/api/system/status');
     if (sysData && sysData.success) {
-      const isRailway = sysData.platform === 'RAILWAY';
+      const isRender = sysData.platform === 'RENDER';
 
-      // CPU / Memory / Requests for Active Backend
-      if (isRailway) {
+      // CPU / Memory / Requests for Active Backend (Primary is Railway or Local Server)
+      if (!isRender) {
         const rCpu = document.getElementById('ha-railway-cpu');
         const rMem = document.getElementById('ha-railway-mem');
         const rReq = document.getElementById('ha-railway-requests');
