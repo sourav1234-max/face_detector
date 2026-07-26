@@ -59,16 +59,25 @@
     }
   }
 
+  function normalizeUrl(url) {
+    if (!url || url.trim() === '') return '';
+    let cleaned = url.trim().replace(/\/$/, '');
+    if (!/^https?:\/\//i.test(cleaned)) {
+      cleaned = 'https://' + cleaned;
+    }
+    return cleaned;
+  }
+
   function getRailwayBaseUrl() {
     if (config.railwayUrl && config.railwayUrl.trim() !== '') {
-      return config.railwayUrl.replace(/\/$/, '');
+      return normalizeUrl(config.railwayUrl);
     }
     return window.location.origin;
   }
 
   function getRenderBaseUrl() {
     if (config.renderUrl && config.renderUrl.trim() !== '') {
-      return config.renderUrl.replace(/\/$/, '');
+      return normalizeUrl(config.renderUrl);
     }
     return '';
   }
