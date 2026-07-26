@@ -901,8 +901,11 @@
       <h2>Admin Access Required</h2>
       <p>Please enter the administrator password to manage the photo catalog.</p>
       <form id="admin-login-form">
-        <div class="form-group">
-          <input type="password" id="admin-auth-password" class="form-input" placeholder="Enter password" required autofocus>
+        <div class="form-group" style="position: relative;">
+          <input type="password" id="admin-auth-password" class="form-input" placeholder="Enter password" required autofocus autocomplete="current-password" spellcheck="false" autocapitalize="none" style="padding-right: 42px;">
+          <button type="button" id="toggle-admin-password-visibility" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #94a3b8; cursor: pointer; padding: 4px; font-size: 16px; display: flex; align-items: center; z-index: 2;" title="Show/Hide Password">
+            <i class="fa-solid fa-eye" id="toggle-admin-password-icon"></i>
+          </button>
           <div id="auth-error-msg" style="color:#f87171; font-size:12px; text-align:left; margin-top:8px; font-weight:500; display:none;">
             <i class="fa-solid fa-circle-exclamation"></i> Incorrect password. Please try again.
           </div>

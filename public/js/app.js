@@ -52,8 +52,8 @@ const MAX_ZIP_DOWNLOAD = 20; // max images to bundle client-side
 // Gallery refresh settings
 const GALLERY_POLL_INTERVAL = 30 * 1000; // 30 seconds
 let galleryRefreshTimer = null;
-// Gallery pagination to avoid rendering too many images at once
-const GALLERY_PAGE_SIZE = 100; // images per page
+// Gallery pagination: load 10 photos first
+const GALLERY_PAGE_SIZE = 10; // images per page
 let currentGalleryPage = 0;
 
 function getPhotoUrl(filename, storageUrl, imageUrl) {

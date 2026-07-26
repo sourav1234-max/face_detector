@@ -362,31 +362,8 @@
   }
 
   function updateOverlay(cache, platform) {
-    createOverlayDom();
-    const progress = cache.progress || {};
-    const percent = progress.percent || (cache.isInitialized ? 100 : 0);
-    const stage = progress.stage || 'Loading metadata...';
-
-    const bar = document.getElementById('ram-cache-progress-bar');
-    const stageEl = document.getElementById('ram-cache-stage-text');
-    const percentEl = document.getElementById('ram-cache-percent-text');
-    const detailEl = document.getElementById('ram-cache-detail-sub');
-    const badgeEl = document.getElementById('ram-cache-platform-badge');
-
-    if (bar) bar.style.width = percent + '%';
-    if (stageEl) stageEl.innerText = stage;
-    if (percentEl) percentEl.innerText = percent + '%';
-    if (badgeEl && platform) badgeEl.innerText = `${platform} Backend Readying`;
-
-    if (detailEl) {
-      if (progress.loadedPhotos !== undefined) {
-        detailEl.innerText = `Photos: ${progress.loadedPhotos || 0} | Descriptors: ${progress.loadedDescriptors || 0} | Events: ${progress.loadedEvents || 0}`;
-      }
-    }
-
-    if (cache.isInitialized || percent >= 100) {
-      removeOverlay();
-    }
+    // Popup overlay is disabled so it will not show to the user
+    removeOverlay();
   }
 
   function removeOverlay() {

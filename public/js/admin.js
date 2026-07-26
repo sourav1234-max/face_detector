@@ -279,8 +279,12 @@ async function adminFetch(url, options = {}) {
   }
 
   if (response.status === 401) {
+    const overlay = document.getElementById('admin-auth-overlay');
+    const wasOpen = overlay && overlay.style.display === 'flex';
     showAuthOverlay(true);
-    showAuthError("Session expired or invalid admin password.");
+    if (!wasOpen) {
+      showAuthError("Session expired or invalid admin password.");
+    }
     throw new Error('Unauthorized');
   } else if (!response.ok) {
     const errRes = await response.json().catch(() => ({}));
@@ -354,15 +358,33 @@ document.addEventListener('DOMContentLoaded', async () => {
 // --- Authentication Flow ---
 function setupAuthEvents() {
   const loginForm = document.getElementById('admin-login-form');
-  loginForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const passwordInput = document.getElementById('admin-auth-password');
-    const passwordVal = passwordInput.value;
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const passwordInput = document.getElementById('admin-auth-password');
+      const passwordVal = passwordInput ? passwordInput.value : '';
 
-    document.getElementById('auth-error-msg').style.display = 'none';
+      const errEl = document.getElementById('auth-error-msg');
+      if (errEl) errEl.style.display = 'none';
 
-    await verifyPasswordAndLoad(passwordVal);
-  });
+      await verifyPasswordAndLoad(passwordVal);
+    });
+  }
+
+  const toggleBtn = document.getElementById('toggle-admin-password-visibility');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      const passInput = document.getElementById('admin-auth-password');
+      const icon = document.getElementById('toggle-admin-password-icon');
+      if (passInput) {
+        const isPassword = passInput.type === 'password';
+        passInput.type = isPassword ? 'text' : 'password';
+        if (icon) {
+          icon.className = isPassword ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+        }
+      }
+    });
+  }
 }
 
 async function verifyPasswordAndLoad(password) {
@@ -427,13 +449,14 @@ async function checkExistingAdminSession() {
 function showAuthOverlay(show) {
   const overlay = document.getElementById('admin-auth-overlay');
   if (overlay) {
+    const wasAlreadyOpen = overlay.style.display === 'flex';
     overlay.style.display = show ? 'flex' : 'none';
-  }
-  if (show) {
-    const passInput = document.getElementById('admin-auth-password');
-    if (passInput) {
-      passInput.value = '';
-      passInput.focus();
+    if (show && !wasAlreadyOpen) {
+      const passInput = document.getElementById('admin-auth-password');
+      if (passInput) {
+        passInput.value = '';
+        passInput.focus();
+      }
     }
   }
 }
@@ -443,11 +466,6 @@ function showAuthError(message) {
   if (errorEl) {
     errorEl.innerHTML = `<i class="fa-solid fa-circle-exclamation"></i> ${message || 'Incorrect password. Please try again.'}`;
     errorEl.style.display = 'block';
-  }
-  const passInput = document.getElementById('admin-auth-password');
-  if (passInput) {
-    passInput.value = '';
-    passInput.focus();
   }
 }
 
@@ -3560,11 +3578,16 @@ function setupHABackendControls() {
   window.addEventListener('backend:switched', updateHARoutingBadge);
 
   updateHARoutingBadge();
-  updateHALiveDashboard();
-  fetchAndRenderHALogs();
+  const authOverlayCheck = document.getElementById('admin-auth-overlay');
+  if (!authOverlayCheck || authOverlayCheck.style.display !== 'flex') {
+    updateHALiveDashboard().catch(() => {});
+    fetchAndRenderHALogs().catch(() => {});
+  }
 
   if (!haPollingInterval) {
     haPollingInterval = setInterval(() => {
+      const currentOverlay = document.getElementById('admin-auth-overlay');
+      if (currentOverlay && currentOverlay.style.display === 'flex') return;
       updateHALiveDashboard().catch(() => {});
     }, 4000);
   }
