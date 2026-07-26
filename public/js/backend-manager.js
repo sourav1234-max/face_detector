@@ -237,9 +237,26 @@
       });
       clearTimeout(timeoutId);
 
-      // If response is successful or client-side error (4xx), return it directly
-      if (res.status < 500) {
+      // If response is successful or client-side error (4xx), return it directly (except 503 passive mode)
+      if (res.status < 500 && res.status !== 503) {
         return res;
+      }
+
+      if (res.status === 503) {
+        const clone = res.clone();
+        const data = await clone.json().catch(() => ({}));
+        if (data && data.passive && data.activeBackend) {
+          console.warn(`[BackendManager] Backend ${primaryBackend} is in PASSIVE mode. Switching active routing to ${data.activeBackend}.`);
+          backendStats.currentActive = data.activeBackend.toLowerCase();
+          notifyListeners('backend:switched', { active: data.activeBackend, reason: 'Backend reported passive mode' });
+          if (config.autoFailover) {
+            const activeUrl = getTargetUrl(urlPath, data.activeBackend);
+            return fetch(activeUrl, requestOptions);
+          }
+        }
+        if (res.status < 500) {
+          return res;
+        }
       }
 
       primaryError = new Error(`Server returned HTTP ${res.status}`);

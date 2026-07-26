@@ -1855,6 +1855,8 @@
               <div class="pbi-card-sub">Real-time status, health metrics, cache inspection, and failover management for Railway & Render</div>
             </div>
             <div class="executive-controls" style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-primary btn-sm" id="ha-switch-railway-btn" style="background:linear-gradient(135deg, #0284c7, #38bdf8); border:none;"><i class="fa-solid fa-train"></i> Switch to Railway</button>
+              <button class="btn btn-secondary btn-sm" id="ha-switch-render-btn" style="background:linear-gradient(135deg, #7c3aed, #c084fc); border:none; color:#fff;"><i class="fa-solid fa-cloud"></i> Switch to Render</button>
               <button class="btn btn-secondary btn-sm" id="ha-manual-health-btn"><i class="fa-solid fa-heart-pulse"></i> Health Check</button>
               <button class="btn btn-secondary btn-sm" id="ha-refresh-cache-btn"><i class="fa-solid fa-arrows-rotate"></i> Reload RAM Cache</button>
               <button class="btn btn-secondary btn-sm" id="ha-rebuild-index-btn"><i class="fa-solid fa-layer-group"></i> Rebuild Search Index</button>
@@ -1914,7 +1916,7 @@
                 <div><span style="color:#64748b;">CPU Usage:</span> <strong id="ha-railway-cpu" style="color:#fff;">-</strong></div>
                 <div><span style="color:#64748b;">RAM Memory:</span> <strong id="ha-railway-mem" style="color:#fff;">-</strong></div>
                 <div><span style="color:#64748b;">Active Requests:</span> <strong id="ha-railway-requests" style="color:#fff;">-</strong></div>
-                <div><span style="color:#64748b;">Role:</span> <strong style="color:#38bdf8;">Primary Backend</strong></div>
+                <div><span style="color:#64748b;">Role:</span> <strong id="ha-railway-role" style="color:#38bdf8;">Primary (Active)</strong></div>
               </div>
             </div>
 
@@ -1932,7 +1934,7 @@
                 <div><span style="color:#64748b;">CPU Usage:</span> <strong id="ha-render-cpu" style="color:#fff;">-</strong></div>
                 <div><span style="color:#64748b;">RAM Memory:</span> <strong id="ha-render-mem" style="color:#fff;">-</strong></div>
                 <div><span style="color:#64748b;">Active Requests:</span> <strong id="ha-render-requests" style="color:#fff;">-</strong></div>
-                <div><span style="color:#64748b;">Role:</span> <strong style="color:#c084fc;">Secondary Backup</strong></div>
+                <div><span style="color:#64748b;">Role:</span> <strong id="ha-render-role" style="color:#c084fc;">Backup (Standby)</strong></div>
               </div>
             </div>
 
