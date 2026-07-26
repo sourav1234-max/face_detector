@@ -1854,9 +1854,11 @@
               <h2 class="executive-title"><i class="fa-solid fa-server" style="color:#38bdf8;"></i> Dual Backend Architecture & HA Monitoring</h2>
               <div class="pbi-card-sub">Real-time status, health metrics, cache inspection, and failover management for Railway & Render</div>
             </div>
-            <div class="executive-controls">
-              <button class="btn btn-secondary btn-sm" id="ha-manual-health-btn"><i class="fa-solid fa-heart-pulse"></i> Ping Health</button>
-              <button class="btn btn-secondary btn-sm" id="ha-refresh-cache-btn"><i class="fa-solid fa-arrows-rotate"></i> Refresh Cache</button>
+            <div class="executive-controls" style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm" id="ha-manual-health-btn"><i class="fa-solid fa-heart-pulse"></i> Health Check</button>
+              <button class="btn btn-secondary btn-sm" id="ha-refresh-cache-btn"><i class="fa-solid fa-arrows-rotate"></i> Reload RAM Cache</button>
+              <button class="btn btn-secondary btn-sm" id="ha-rebuild-index-btn"><i class="fa-solid fa-layer-group"></i> Rebuild Search Index</button>
+              <button class="btn btn-secondary btn-sm" id="ha-reconnect-firestore-btn"><i class="fa-solid fa-plug-circle-bolt"></i> Reconnect Firestore</button>
               <button class="btn btn-primary btn-sm" id="ha-sync-firestore-btn"><i class="fa-solid fa-rotate"></i> Force Sync Firestore</button>
             </div>
           </div>

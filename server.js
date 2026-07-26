@@ -11,6 +11,8 @@ const {
   isFirebaseEnabled,
   initRamCache,
   refreshRamCache,
+  reconnectFirestore,
+  rebuildSearchIndex,
   getCacheStatus,
   getMetrics,
   readGalleryDb,
@@ -33,7 +35,7 @@ const {
   deleteFromFirebaseStorage,
   getFirebaseFileStream
 } = require('./lib/store');
-const { initFirebase } = require('./lib/firebase');
+const { initFirebase, getFirebaseStatus } = require('./lib/firebase');
 const {
   CURRENT_PLATFORM,
   getSystemMetrics,
@@ -87,7 +89,7 @@ app.use((req, res, next) => {
 // Cache Readiness & Blocking Middleware
 app.use((req, res, next) => {
   const reqPath = req.path;
-  // Allow health check, system status, cache progress, auth, static assets, and HTML pages to pass through
+  // Allow health check, system status, cache progress, cache status, auth, static assets, and HTML pages to pass through
   if (
     reqPath === '/' ||
     reqPath === '/index.html' ||
@@ -95,6 +97,7 @@ app.use((req, res, next) => {
     reqPath === '/api/health' ||
     reqPath === '/api/system/status' ||
     reqPath === '/api/cache/progress' ||
+    reqPath === '/api/cache/status' ||
     reqPath === '/api/admin/login' ||
     reqPath === '/api/admin/session-check' ||
     reqPath === '/api/admin/logout' ||
@@ -180,12 +183,66 @@ function getGoogleRedirectUri(req) {
 
 app.get('/api/health', (req, res) => {
   const cacheStatus = getCacheStatus();
+  const fbStatus = getFirebaseStatus();
+  const systemMetrics = getSystemMetrics();
+
+  let driveConnected = false;
+  try {
+    const settingsSync = readSettingsSync ? readSettingsSync() : null;
+    driveConnected = !!(settingsSync && settingsSync.googleRefreshToken);
+  } catch (err) {}
+
   res.json({
     status: 'ok',
     platform: CURRENT_PLATFORM,
     uptimeSeconds: Math.floor(process.uptime()),
-    cacheInitialized: cacheStatus.isInitialized,
+    firestore: {
+      connected: fbStatus.initialized,
+      status: fbStatus.status,
+      error: fbStatus.error || null,
+      projectId: fbStatus.projectId || null
+    },
+    cache: {
+      ready: cacheStatus.isInitialized,
+      loading: !cacheStatus.isInitialized,
+      loadedPhotos: cacheStatus.totalPhotos || 0,
+      loadedEvents: cacheStatus.totalEvents || 0,
+      loadedDescriptors: cacheStatus.totalDescriptors || 0,
+      cacheSizeMB: cacheStatus.cacheSizeMB || 0,
+      initTimeMs: cacheStatus.progress ? cacheStatus.progress.initTimeMs || 0 : 0
+    },
+    googleDrive: {
+      connected: driveConnected
+    },
+    system: {
+      cpuPercent: systemMetrics ? systemMetrics.cpuPercent : 0,
+      memory: systemMetrics ? systemMetrics.memory : {}
+    },
     timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/api/cache/status', (req, res) => {
+  const cacheStatus = getCacheStatus();
+  const fbStatus = getFirebaseStatus();
+  const progress = cacheStatus.progress || {};
+
+  res.json({
+    success: true,
+    platform: CURRENT_PLATFORM,
+    cacheReady: cacheStatus.isInitialized,
+    cacheLoading: !cacheStatus.isInitialized,
+    photosLoaded: cacheStatus.totalPhotos || 0,
+    eventsLoaded: cacheStatus.totalEvents || 0,
+    faceDescriptorsLoaded: cacheStatus.totalDescriptors || 0,
+    totalRecords: (cacheStatus.totalPhotos || 0) + (cacheStatus.totalEvents || 0),
+    cacheSizeMB: cacheStatus.cacheSizeMB || 0,
+    initDurationMs: progress.initTimeMs || 0,
+    lastCacheRefresh: progress.lastRefresh || null,
+    lastFirestoreSync: progress.lastRefresh || null,
+    firestoreStatus: fbStatus.status,
+    firestoreError: fbStatus.error || null,
+    stage: progress.stage || 'Complete'
   });
 });
 
@@ -202,7 +259,7 @@ app.get('/api/system/status', async (req, res) => {
   const systemMetrics = getSystemMetrics();
   const cacheStatus = getCacheStatus();
   const opMetrics = getMetrics();
-  const isFirebase = isFirebaseEnabled();
+  const fbStatus = getFirebaseStatus();
 
   let driveConnected = false;
   try {
@@ -216,7 +273,10 @@ app.get('/api/system/status', async (req, res) => {
     system: systemMetrics,
     cache: cacheStatus,
     firestore: {
-      status: isFirebase ? 'Connected' : 'Disconnected',
+      status: fbStatus.status,
+      connected: fbStatus.initialized,
+      error: fbStatus.error || null,
+      projectId: fbStatus.projectId || null,
       reads: opMetrics.firestoreReads,
       writes: opMetrics.firestoreWrites,
       deletes: opMetrics.firestoreDeletes,
@@ -252,6 +312,56 @@ app.post('/api/admin/cache/refresh', async (req, res) => {
       eventType: 'CACHE',
       status: 'ERROR',
       details: `Manual RAM cache refresh failed: ${err.message}`
+    });
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admin/firestore/reconnect', async (req, res) => {
+  if (!(await isValidAdminSession(req))) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  try {
+    addSystemLog({
+      backend: CURRENT_PLATFORM,
+      eventType: 'FIRESTORE',
+      status: 'INFO',
+      details: 'Manual Firestore reconnection attempt triggered by administrator.'
+    });
+    await reconnectFirestore();
+    res.json({ success: true, message: 'Firestore connection reset & RAM cache reloaded.' });
+  } catch (err) {
+    addSystemLog({
+      backend: CURRENT_PLATFORM,
+      eventType: 'FIRESTORE',
+      status: 'ERROR',
+      details: `Firestore reconnection failed: ${err.message}`
+    });
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admin/cache/rebuild', async (req, res) => {
+  if (!(await isValidAdminSession(req))) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  try {
+    addSystemLog({
+      backend: CURRENT_PLATFORM,
+      eventType: 'CACHE',
+      status: 'INFO',
+      details: 'Search index & RAM cache rebuild triggered by administrator.'
+    });
+    await rebuildSearchIndex();
+    res.json({ success: true, message: 'Search index & RAM cache rebuilt successfully.' });
+  } catch (err) {
+    addSystemLog({
+      backend: CURRENT_PLATFORM,
+      eventType: 'CACHE',
+      status: 'ERROR',
+      details: `Search index rebuild failed: ${err.message}`
     });
     res.status(500).json({ success: false, error: err.message });
   }

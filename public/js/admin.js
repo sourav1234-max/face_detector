@@ -3439,6 +3439,38 @@ function setupHABackendControls() {
     });
   }
 
+  const rebuildIndexBtn = document.getElementById('ha-rebuild-index-btn');
+  if (rebuildIndexBtn) {
+    rebuildIndexBtn.addEventListener('click', async () => {
+      try {
+        toastInfo('Rebuilding Index', 'Re-indexing face descriptors & metadata cache...');
+        const res = await adminFetch('/api/admin/cache/rebuild', { method: 'POST' });
+        if (res.success) {
+          toastSuccess('Index Rebuilt', res.message);
+          setTimeout(updateHALiveDashboard, 1500);
+        }
+      } catch (err) {
+        toastError('Rebuild Failed', err.message);
+      }
+    });
+  }
+
+  const reconnectFsBtn = document.getElementById('ha-reconnect-firestore-btn');
+  if (reconnectFsBtn) {
+    reconnectFsBtn.addEventListener('click', async () => {
+      try {
+        toastInfo('Reconnecting Firestore', 'Resetting Firebase credentials & reloading RAM cache...');
+        const res = await adminFetch('/api/admin/firestore/reconnect', { method: 'POST' });
+        if (res.success) {
+          toastSuccess('Firestore Reconnected', res.message);
+          setTimeout(updateHALiveDashboard, 1500);
+        }
+      } catch (err) {
+        toastError('Reconnection Failed', err.message);
+      }
+    });
+  }
+
   const refreshLogsBtn = document.getElementById('ha-refresh-logs-btn');
   if (refreshLogsBtn) {
     refreshLogsBtn.addEventListener('click', () => {
@@ -3598,8 +3630,18 @@ async function updateHALiveDashboard() {
       const fsDeletes = document.getElementById('ha-fs-deletes');
 
       if (fsBadge) {
-        fsBadge.innerText = sysData.firestore.status;
-        fsBadge.className = sysData.firestore.status === 'Connected' ? 'badge badge-approved' : 'badge badge-pending';
+        const st = sysData.firestore.status || 'Unknown';
+        fsBadge.innerText = st;
+        if (st === 'Connected') {
+          fsBadge.className = 'badge badge-approved';
+          fsBadge.title = `Connected to Firestore project ${sysData.firestore.projectId || ''}`;
+        } else if (st.includes('Failed') || st.includes('Error')) {
+          fsBadge.className = 'badge badge-rejected';
+          fsBadge.title = sysData.firestore.error || 'Firestore authentication or initialization failed';
+        } else {
+          fsBadge.className = 'badge badge-pending';
+          fsBadge.title = sysData.firestore.error || 'Firestore disabled or uninitialized';
+        }
       }
       if (fsReads) fsReads.innerText = (sysData.firestore.reads || 0).toLocaleString();
       if (fsWrites) fsWrites.innerText = (sysData.firestore.writes || 0).toLocaleString();
