@@ -12,8 +12,8 @@
   const config = {
     mode: 'auto',         // 'auto' | 'railway' | 'render'
     autoFailover: true,   // Automatically retry request on Render if Railway fails
-    railwayUrl: '',       // Custom Railway URL override (defaults to current origin if on Railway)
-    renderUrl: '',        // Render backup backend URL (e.g., https://app.onrender.com)
+    railwayUrl: typeof window !== 'undefined' && (window.RAILWAY_URL || (window.ENV && window.ENV.RAILWAY_URL)) ? (window.RAILWAY_URL || window.ENV.RAILWAY_URL) : '',
+    renderUrl: typeof window !== 'undefined' && (window.RENDER_URL || (window.ENV && window.ENV.RENDER_URL)) ? (window.RENDER_URL || window.ENV.RENDER_URL) : '',
     pingIntervalMs: 15000 // Background health check interval (15s)
   };
 
@@ -30,7 +30,7 @@
   // Health & Metric Tracking State
   const backendStats = {
     railway: {
-      url: config.railwayUrl || window.location.origin,
+      url: config.railwayUrl || '',
       status: 'unknown', // 'online' | 'offline' | 'loading'
       responseTimeMs: 0,
       uptimeSeconds: 0,
@@ -68,16 +68,30 @@
     return cleaned;
   }
 
-  function getRailwayBaseUrl() {
-    if (config.railwayUrl && config.railwayUrl.trim() !== '') {
-      return normalizeUrl(config.railwayUrl);
+  function isSameServer() {
+    if (typeof window === 'undefined' || !window.location) return false;
+    const hostname = (window.location.hostname || '').toLowerCase();
+    if (hostname.endsWith('.vercel.app') || hostname.includes('vercel')) {
+      return false;
     }
-    return window.location.origin;
+    return true;
+  }
+
+  function getRailwayBaseUrl() {
+    const configured = config.railwayUrl || (typeof window !== 'undefined' && (window.RAILWAY_URL || (window.ENV && window.ENV.RAILWAY_URL)));
+    if (configured && configured.trim() !== '') {
+      return normalizeUrl(configured);
+    }
+    if (isSameServer()) {
+      return window.location.origin;
+    }
+    return '';
   }
 
   function getRenderBaseUrl() {
-    if (config.renderUrl && config.renderUrl.trim() !== '') {
-      return normalizeUrl(config.renderUrl);
+    const configured = config.renderUrl || (typeof window !== 'undefined' && (window.RENDER_URL || (window.ENV && window.ENV.RENDER_URL)));
+    if (configured && configured.trim() !== '') {
+      return normalizeUrl(configured);
     }
     return '';
   }
@@ -114,7 +128,7 @@
 
     if (!baseUrl) {
       stats.status = 'offline';
-      stats.error = 'URL not configured';
+      stats.error = backendKey === 'railway' && !isSameServer() ? 'Railway URL not configured for Vercel' : 'URL not configured';
       notifyListeners('backend:health-updated', { backend: backendKey, stats });
       return stats;
     }
@@ -157,6 +171,23 @@
     return stats;
   }
 
+  let healthCheckTimer = null;
+
+  function scheduleAdaptiveHealthCheck() {
+    if (healthCheckTimer) {
+      clearTimeout(healthCheckTimer);
+      healthCheckTimer = null;
+    }
+
+    // Fast polling (3s) if Railway is offline in auto mode, else standard interval (15s)
+    const isRailwayOffline = backendStats.railway.status === 'offline';
+    const interval = (config.mode === 'auto' && isRailwayOffline) ? 3000 : (config.pingIntervalMs || 15000);
+
+    healthCheckTimer = setTimeout(() => {
+      checkHealthAll().catch(() => {});
+    }, interval);
+  }
+
   // Perform Health Checks on Both Backends
   async function checkHealthAll() {
     await Promise.all([
@@ -164,21 +195,28 @@
       pingBackend('render')
     ]);
 
-    // Evaluate failover state if mode is auto
+    // Priority Check: Railway must always have highest priority in auto mode
     if (config.mode === 'auto') {
-      if (backendStats.railway.status === 'offline' && backendStats.render.status === 'online') {
-        if (backendStats.currentActive !== 'render') {
-          backendStats.currentActive = 'render';
-          notifyListeners('backend:switched', { active: 'render', reason: 'Railway offline, switched to Render' });
-        }
-      } else if (backendStats.railway.status === 'online') {
+      if (backendStats.railway.status === 'online') {
         if (backendStats.currentActive !== 'railway') {
           backendStats.currentActive = 'railway';
           notifyListeners('backend:switched', { active: 'railway', reason: 'Railway healthy, restored primary' });
         }
+      } else if (backendStats.render.status === 'online') {
+        if (backendStats.currentActive !== 'render') {
+          backendStats.currentActive = 'render';
+          notifyListeners('backend:switched', { active: 'render', reason: 'Railway offline, switched to Render' });
+        }
+      } else {
+        if (backendStats.currentActive !== 'railway') {
+          backendStats.currentActive = 'railway';
+        }
       }
+    } else if (config.mode === 'railway' || config.mode === 'render') {
+      backendStats.currentActive = config.mode;
     }
 
+    scheduleAdaptiveHealthCheck();
     return backendStats;
   }
 
@@ -216,8 +254,14 @@
     } else if (config.mode === 'railway') {
       primaryBackend = 'railway';
     } else {
-      // Auto mode: use current active health recommendation
-      primaryBackend = backendStats.currentActive;
+      // Auto mode decision based on backend health state:
+      // If Railway is online, unknown, or loading (or both offline), try Railway first.
+      // Only start on Render if Railway is explicitly offline AND Render is online.
+      if (backendStats.railway.status === 'offline' && backendStats.render.status === 'online') {
+        primaryBackend = 'render';
+      } else {
+        primaryBackend = 'railway';
+      }
     }
 
     const secondaryBackend = primaryBackend === 'railway' ? 'render' : 'railway';
@@ -239,6 +283,10 @@
 
       // If response is successful or client-side error (4xx), return it directly (except 503 passive mode)
       if (res.status < 500 && res.status !== 503) {
+        if (primaryBackend === 'railway' && backendStats.railway.status !== 'online') {
+          backendStats.railway.status = 'online';
+          backendStats.railway.error = null;
+        }
         return res;
       }
 
@@ -265,13 +313,19 @@
       primaryError = err;
     }
 
+    // Mark primary backend offline if attempt failed
+    if (primaryBackend === 'railway') {
+      backendStats.railway.status = 'offline';
+      backendStats.railway.error = primaryError ? primaryError.message : 'Request failed';
+    }
+
     // If primary attempt succeeded or failover is disabled or no backup URL configured, throw/return error
     const backupUrl = getTargetUrl(urlPath, secondaryBackend);
     if (!config.autoFailover || !getRenderBaseUrl() || primaryUrl === backupUrl) {
       if (primaryError) throw primaryError;
     }
 
-    // Trigger Automatic Failover Retry
+    // Trigger Automatic Failover Retry for current request
     console.warn(`[BackendManager] Primary backend (${primaryBackend}) failed (${primaryError.message}). Retrying on secondary backend (${secondaryBackend})...`);
 
     backendStats.isFailingOver = true;
@@ -281,6 +335,16 @@
       reason: primaryError.message,
       url: urlPath
     });
+
+    // Schedule an immediate fast health re-check for Railway in background
+    setTimeout(() => {
+      pingBackend('railway').then(() => {
+        if (config.mode === 'auto' && backendStats.railway.status === 'online') {
+          backendStats.currentActive = 'railway';
+          notifyListeners('backend:switched', { active: 'railway', reason: 'Railway healthy, restored primary' });
+        }
+      }).catch(() => {});
+    }, 1000);
 
     try {
       const secondaryController = new AbortController();
@@ -293,7 +357,8 @@
       clearTimeout(secondaryTimeout);
 
       backendStats.isFailingOver = false;
-      backendStats.currentActive = secondaryBackend;
+      // Do NOT set backendStats.currentActive = secondaryBackend permanently!
+      // Failover applies ONLY to the current request.
       return backupRes;
 
     } catch (secondaryErr) {
@@ -493,9 +558,6 @@
 
   // Start background health ping loop
   checkHealthAll().catch(() => {});
-  setInterval(() => {
-    checkHealthAll().catch(() => {});
-  }, config.pingIntervalMs);
 
   // Expose API on window.BackendManager
   global.BackendManager = {
