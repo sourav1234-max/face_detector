@@ -3728,8 +3728,15 @@ async function updateHALiveDashboard() {
 
   // 4. Update Detailed Stats JSON
   try {
-    const sysData = haData || await adminFetch('/api/system/status');
-    if (sysData && sysData.success) {
+    let sysData = null;
+    try {
+      const res = window.BackendManager ? await window.BackendManager.fetch('/api/system/status') : await fetch('/api/system/status');
+      if (res && res.ok) {
+        sysData = await res.json();
+      }
+    } catch (fErr) {}
+
+    if (sysData && sysData.success && sysData.cache && sysData.system) {
       const isRender = sysData.platform === 'RENDER';
 
       // CPU / Memory / Requests for Active Backend (Primary is Railway or Local Server)

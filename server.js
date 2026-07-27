@@ -165,7 +165,7 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1d' }));
 
 // Memory storage works on Vercel (no persistent local disk)
 const upload = multer({
@@ -1016,11 +1016,15 @@ async function syncGoogleDrivePhotos(req = null, forceAll = false) {
       return;
     }
 
-    const processedFileIds = new Set(
-      existingPhotos
-        .filter(p => p.fileId || (p.filename && p.filename.startsWith('drive:')))
-        .map(p => p.fileId || p.filename.slice('drive:'.length))
-    );
+    const processedFileIds = new Set();
+    const processedNames = new Set();
+    existingPhotos.forEach(p => {
+      if (p.fileId) processedFileIds.add(p.fileId);
+      if (p.filename && p.filename.startsWith('drive:')) processedFileIds.add(p.filename.slice('drive:'.length));
+      if (p.originalName) processedNames.add(p.originalName.toLowerCase().trim());
+      if (p.originalFileName) processedNames.add(p.originalFileName.toLowerCase().trim());
+      if (p.filename) processedNames.add(p.filename.toLowerCase().trim());
+    });
 
     // List images in the Google Drive folder
     const driveFiles = [];
@@ -1043,8 +1047,12 @@ async function syncGoogleDrivePhotos(req = null, forceAll = false) {
       return;
     }
 
-    // Filter out already processed files
-    const unprocessedFiles = driveFiles.filter(file => !processedFileIds.has(file.id));
+    // Filter out already processed files (by ID or file name)
+    const unprocessedFiles = driveFiles.filter(file => {
+      if (processedFileIds.has(file.id)) return false;
+      if (file.name && processedNames.has(file.name.toLowerCase().trim())) return false;
+      return true;
+    });
     if (unprocessedFiles.length === 0) {
       return { success: true, count: 0 };
     }
@@ -1058,30 +1066,35 @@ async function syncGoogleDrivePhotos(req = null, forceAll = false) {
     for (const file of filesToProcess) {
       console.log(`[GDrive Sync] Processing file: ${file.name} (${file.id})`);
       let tempPath = null;
+
       try {
-        // 1. Download file from Google Drive into memory
-        const response = await drive.files.get(
+        // 1. Download file from Google Drive to temporary local file
+        const tempFilename = `gdrive_temp_${Date.now()}_${file.id}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        tempPath = path.join(__dirname, 'public', 'uploads', tempFilename);
+
+        const destStream = fs.createWriteStream(tempPath);
+        const getRes = await drive.files.get(
           { fileId: file.id, alt: 'media' },
-          { responseType: 'arraybuffer' }
+          { responseType: 'stream' }
         );
-        const buffer = Buffer.from(response.data);
 
-        // 2. Save file temporarily in scratch directory
-        const ext = path.extname(file.name).toLowerCase() || '.jpg';
-        const tempDir = path.join(__dirname, 'scratch');
-        if (!fs.existsSync(tempDir)) {
-          fs.mkdirSync(tempDir, { recursive: true });
-        }
-        tempPath = path.join(tempDir, `gdrive_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}${ext}`);
-        fs.writeFileSync(tempPath, buffer);
+        await new Promise((resolve, reject) => {
+          getRes.data
+            .on('end', () => resolve())
+            .on('error', err => reject(err))
+            .pipe(destStream);
+        });
 
-        // 3. Run python face detection
-        console.log(`[GDrive Sync] Running face detection for ${file.name}...`);
+        // Read file buffer for descriptors computation
+        const buffer = fs.readFileSync(tempPath);
+
+        // 2. Run Face Detection
         let descriptors = [];
         let faceDetectionStatus = 'No Face Detected';
         let faceDetected = false;
 
-        const isFaceDetectionEnabled = settings.faceDetectionEnabled !== false;
+        const syncSettings = await readSettings();
+        const isFaceDetectionEnabled = syncSettings.faceDetectionEnabled !== false;
         if (!isFaceDetectionEnabled) {
           console.log(`[GDrive Sync] Face Detection is DISABLED globally. Skipping detection for ${file.name}.`);
           faceDetectionStatus = 'Skipped (Detection Disabled)';
@@ -1089,14 +1102,11 @@ async function syncGoogleDrivePhotos(req = null, forceAll = false) {
           try {
             const detectResult = await runPythonFaceDetector(tempPath);
             if (detectResult && detectResult.success && Array.isArray(detectResult.faces)) {
-              descriptors = detectResult.faces;
+              descriptors = detectResult.faces.map(f => f.descriptor);
               if (descriptors.length > 0) {
                 faceDetectionStatus = 'Face Detected';
                 faceDetected = true;
               }
-              console.log(`[GDrive Sync] Face detection found ${descriptors.length} face(s) for ${file.name}`);
-            } else {
-              console.warn(`[GDrive Sync] Face detection returned no faces or error:`, detectResult ? detectResult.error : 'no response');
             }
           } catch (detectErr) {
             console.error(`[GDrive Sync] Face detection failed for ${file.name}:`, detectErr.message);
@@ -1128,8 +1138,8 @@ async function syncGoogleDrivePhotos(req = null, forceAll = false) {
           uploadTime,
           timestamp: uploadTime,
           descriptors,
-          status: 'pending',
-          isPublic: false,
+          status: 'approved',
+          isPublic: true,
           faceDetectionStatus,
           faceDetected
         };
@@ -1222,11 +1232,21 @@ async function syncLocalUploadsIfNeeded() {
     }
 
     const gallery = await readGalleryDb();
-    const existingFilenames = new Set(gallery.map(p => p.filename));
+    const existingKeys = new Set();
+    gallery.forEach(p => {
+      if (p.filename) existingKeys.add(p.filename.toLowerCase().trim());
+      if (p.originalName) existingKeys.add(p.originalName.toLowerCase().trim());
+      if (p.originalFileName) existingKeys.add(p.originalFileName.toLowerCase().trim());
+      if (p.storageUrl) {
+        const parts = p.storageUrl.split('/');
+        existingKeys.add(parts[parts.length - 1].toLowerCase().trim());
+      }
+    });
 
     for (const file of imageFiles) {
-      // Check if already in database (using name match)
-      if (existingFilenames.has(file)) {
+      const lowerFile = file.toLowerCase().trim();
+      const rawName = file.replace(/^\d+_/, '').toLowerCase().trim();
+      if (existingKeys.has(lowerFile) || existingKeys.has(rawName)) {
         continue;
       }
 
@@ -1280,8 +1300,8 @@ async function syncLocalUploadsIfNeeded() {
           faceDetectionStatus,
           faceDetected,
           descriptors: descriptors.map(f => f.descriptor),
-          status: 'pending',
-          isPublic: false
+          status: 'approved',
+          isPublic: true
         };
 
         await addPhoto(photoRecord);
@@ -2419,32 +2439,54 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
+let cachedDriveClient = null;
+let cachedDriveRefreshToken = null;
+
+async function getSharedDriveClient(req) {
+  const settings = await readSettings();
+  if (!settings.googleRefreshToken) return null;
+
+  if (cachedDriveClient && cachedDriveRefreshToken === settings.googleRefreshToken) {
+    return cachedDriveClient;
+  }
+
+  const oauth2Client = await createGoogleOAuthClient(req);
+  if (!oauth2Client) return null;
+  oauth2Client.setCredentials({ refresh_token: settings.googleRefreshToken });
+  const drive = google.drive({ version: 'v3', auth: oauth2Client });
+
+  cachedDriveClient = drive;
+  cachedDriveRefreshToken = settings.googleRefreshToken;
+  return drive;
+}
+
 app.get('/api/drive/photo/:fileId', async (req, res) => {
   try {
-    const settings = await readSettings();
-    if (!settings.googleRefreshToken) {
+    const fileId = req.params.fileId;
+    if (!fileId) return res.status(400).send('Missing fileId');
+
+    // 7-day aggressive HTTP caching for browser & CDN
+    res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800, immutable');
+
+    const drive = await getSharedDriveClient(req);
+    if (!drive) {
+      res.setHeader('Cache-Control', 'no-store');
       return res.status(400).send('Google Drive is not connected.');
     }
 
-    const oauth2Client = await createGoogleOAuthClient(req);
-    oauth2Client.setCredentials({ refresh_token: settings.googleRefreshToken });
-    const drive = google.drive({ version: 'v3', auth: oauth2Client });
-
-    const metaResponse = await drive.files.get({ fileId: req.params.fileId, fields: 'mimeType' });
     const response = await drive.files.get(
-      { fileId: req.params.fileId, alt: 'media' },
+      { fileId: fileId, alt: 'media' },
       { responseType: 'stream' }
     );
 
-    const contentType = (response.headers && response.headers['content-type'])
-      || (metaResponse && metaResponse.data && metaResponse.data.mimeType)
-      || 'application/octet-stream';
+    const contentType = (response.headers && response.headers['content-type']) || 'image/jpeg';
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', 'inline');
     response.data.pipe(res);
   } catch (err) {
     console.error('Error fetching file from Google Drive:', err.message || err);
+    res.setHeader('Cache-Control', 'no-store');
     res.status(500).send('Error loading image.');
   }
 });
@@ -2462,7 +2504,7 @@ app.get('/api/storage/photo', async (req, res) => {
 
     const { stream, contentType } = await getFirebaseFileStream(storagePath);
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800, immutable');
     stream.pipe(res);
   } catch (err) {
     console.error('Error fetching Firebase Storage file:', err.message);
