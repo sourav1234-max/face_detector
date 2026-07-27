@@ -1,5 +1,5 @@
 /**
- * Automated Verification Script for Dual Backend Manager Fixes
+ * Comprehensive Automated Verification Script for Dual Backend Manager Fixes
  */
 
 const fs = require('fs');
@@ -11,10 +11,16 @@ const sourceCode = fs.readFileSync(scriptPath, 'utf8');
 
 let mockListeners = [];
 let fetchMocks = {};
+let consoleLogs = [];
+let consoleWarns = [];
+let consoleErrors = [];
 
 function createMockEnvironment(hostname = 'localhost') {
   mockListeners = [];
   fetchMocks = {};
+  consoleLogs = [];
+  consoleWarns = [];
+  consoleErrors = [];
 
   const localStorageData = {};
   const mockLocalStorage = {
@@ -45,7 +51,6 @@ function createMockEnvironment(hostname = 'localhost') {
     if (fetchMocks[urlStr]) {
       return fetchMocks[urlStr](url, options);
     }
-    // Pattern matching
     for (const [pattern, handler] of Object.entries(fetchMocks)) {
       if (urlStr.includes(pattern)) {
         return handler(url, options);
@@ -59,17 +64,23 @@ function createMockEnvironment(hostname = 'localhost') {
     };
   };
 
+  const customConsole = {
+    log: (...args) => consoleLogs.push(args.join(' ')),
+    warn: (...args) => consoleWarns.push(args.join(' ')),
+    error: (...args) => consoleErrors.push(args.join(' '))
+  };
+
   // Evaluate script in isolated context
-  const evalFn = new Function('window', 'global', 'navigator', 'fetch', 'localStorage', sourceCode);
-  evalFn(mockWindow, mockWindow, mockNavigator, mockFetch, mockLocalStorage);
+  const evalFn = new Function('window', 'global', 'navigator', 'fetch', 'localStorage', 'console', sourceCode);
+  evalFn(mockWindow, mockWindow, mockNavigator, mockFetch, mockLocalStorage, customConsole);
 
   return { mockWindow, mockFetch };
 }
 
 async function runTests() {
-  console.log('====================================================');
-  console.log('   RUNNING DUAL BACKEND MANAGER VERIFICATION TESTS   ');
-  console.log('====================================================\n');
+  console.log('===========================================================');
+  console.log('   RUNNING ENHANCED DUAL BACKEND MANAGER RELIABILITY TESTS  ');
+  console.log('===========================================================\n');
 
   let passed = 0;
   let failed = 0;
@@ -84,17 +95,12 @@ async function runTests() {
     }
   }
 
-  // --- Test 1: Vercel Origin Prevention ---
-  console.log('--- Test 1: Vercel Origin Prevention ---');
+  // --- Test 1: Startup Validation on Vercel ---
+  console.log('--- Test 1: Startup Validation on Vercel ---');
   {
-    const { mockWindow } = createMockEnvironment('my-app.vercel.app');
-    const BM = mockWindow.BackendManager;
-    const stats = BM.getStats();
-    assert(stats.railway.url === '', 'Railway URL defaults to empty on Vercel (not Vercel origin)');
-
-    BM.updateConfig({ railwayUrl: 'https://my-railway-app.up.railway.app' });
-    const updatedStats = BM.getStats();
-    assert(updatedStats.railway.url === 'https://my-railway-app.up.railway.app', 'Explicit Railway URL is respected on Vercel');
+    createMockEnvironment('my-app.vercel.app');
+    const hasVercelErr = consoleErrors.some(m => m.includes('Railway URL is not configured') && m.includes('running on Vercel'));
+    assert(hasVercelErr, 'Startup validation outputs error log when RAILWAY_URL is missing on Vercel');
   }
 
   // --- Test 2: Localhost Origin Fallback ---
@@ -106,8 +112,8 @@ async function runTests() {
     assert(stats.railway.url === 'https://localhost', 'Railway URL falls back to location.origin on same server/localhost');
   }
 
-  // --- Test 3: Per-Request Failover Isolation (Does NOT lock currentActive to Render) ---
-  console.log('\n--- Test 3: Per-Request Failover Isolation ---');
+  // --- Test 3: HTTP 503 Passive Mode Does NOT Mutate Global Routing ---
+  console.log('\n--- Test 3: HTTP 503 Passive Mode Isolation ---');
   {
     const { mockWindow } = createMockEnvironment('my-app.vercel.app');
     const BM = mockWindow.BackendManager;
@@ -118,31 +124,72 @@ async function runTests() {
       renderUrl: 'https://render-backup.onrender.com'
     });
 
-    // Mock Railway health check & request failure, Render success
+    // Mock Railway health check online, but /api/data returns 503 passive mode recommending render
     fetchMocks['railway-primary.up.railway.app'] = async (url) => {
       if (url.includes('/api/health')) {
         return { ok: true, status: 200, json: async () => ({ uptimeSeconds: 100 }) };
       }
-      throw new Error('Railway connection reset');
+      return {
+        ok: false,
+        status: 503,
+        json: async () => ({ passive: true, activeBackend: 'render' }),
+        clone: function() { return this; }
+      };
     };
 
-    fetchMocks['render-backup.onrender.com'] = async (url) => {
-      return { ok: true, status: 200, json: async () => ({ data: 'from_render' }), clone: function() { return this; } };
-    };
+    fetchMocks['render-backup.onrender.com'] = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: 'from_render' }),
+      clone: function() { return this; }
+    });
 
-    // Initialize health check
     await BM.checkHealth();
-    assert(BM.getStats().currentActive === 'railway', 'Before request: currentActive is railway');
+    assert(BM.getStats().currentActive === 'railway', 'Before passive request: currentActive is railway');
 
-    // Perform haFetch request - Railway will fail, failover to Render
     const res = await BM.fetch('/api/data');
     const json = await res.json();
-    assert(json.data === 'from_render', 'Request succeeded via Render failover');
-    assert(BM.getStats().currentActive === 'railway', 'After failover: currentActive MUST STILL be railway (not permanently changed!)');
+    assert(json.data === 'from_render', 'Passive request retried on Render successfully');
+    assert(BM.getStats().currentActive === 'railway', 'After 503 passive request: currentActive MUST STILL be railway');
   }
 
-  // --- Test 4: Priority & Recovery in Health Check ---
-  console.log('\n--- Test 4: Health Check Priority & Recovery ---');
+  // --- Test 4: Single Request Failure Does NOT Mark Railway Offline ---
+  console.log('\n--- Test 4: Health Status Separation (No Immediate Offline Mutation) ---');
+  {
+    const { mockWindow } = createMockEnvironment('my-app.vercel.app');
+    const BM = mockWindow.BackendManager;
+    BM.updateConfig({
+      mode: 'auto',
+      autoFailover: true,
+      railwayUrl: 'https://railway.up.railway.app',
+      renderUrl: 'https://render.onrender.com'
+    });
+
+    // Railway health check returns 200 online, but request to /api/error returns 500
+    fetchMocks['railway.up.railway.app'] = async (url) => {
+      if (url.includes('/api/health')) {
+        return { ok: true, status: 200, json: async () => ({ uptimeSeconds: 500 }) };
+      }
+      return { ok: false, status: 500, json: async () => ({ error: 'Internal server error' }), clone: function() { return this; } };
+    };
+
+    fetchMocks['render.onrender.com'] = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: 'render_ok' }),
+      clone: function() { return this; }
+    });
+
+    await BM.checkHealth();
+    assert(BM.getStats().railway.status === 'online', 'Health status is online before failed request');
+
+    // Make request that returns 500
+    await BM.fetch('/api/error');
+    assert(BM.getStats().railway.status === 'online', 'Health status remains online after single 500 request failure (does NOT force offline)');
+  }
+
+  // --- Test 5: Health Check Priority & Recovery ---
+  console.log('\n--- Test 5: Health Check Priority & Recovery ---');
   {
     const { mockWindow } = createMockEnvironment('my-app.vercel.app');
     const BM = mockWindow.BackendManager;
@@ -166,9 +213,9 @@ async function runTests() {
     assert(BM.getStats().currentActive === 'railway', 'Phase B: Railway back online -> active immediately restored to railway');
   }
 
-  console.log('\n====================================================');
+  console.log('\n===========================================================');
   console.log(`   TEST SUMMARY: ${passed} PASSED, ${failed} FAILED`);
-  console.log('====================================================');
+  console.log('===========================================================');
 
   if (failed > 0) {
     process.exit(1);

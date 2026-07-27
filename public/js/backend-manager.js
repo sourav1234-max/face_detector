@@ -96,6 +96,26 @@
     return '';
   }
 
+  function validateStartupConfig() {
+    const railwayBase = getRailwayBaseUrl();
+    const renderBase = getRenderBaseUrl();
+    const onVercel = !isSameServer();
+
+    if (onVercel && !railwayBase) {
+      console.error('[BackendManager] Railway URL is not configured.\nFrontend is running on Vercel.\nAuto mode cannot use Railway until RAILWAY_URL is provided.');
+    } else if (railwayBase) {
+      console.log(`[BackendManager] Primary backend (Railway) URL: ${railwayBase}`);
+    }
+
+    if (!renderBase) {
+      console.warn('[BackendManager] Render Backup URL is not configured. Auto failover to Render will be unavailable until RENDER_URL is provided.');
+    } else {
+      console.log(`[BackendManager] Backup backend (Render) URL: ${renderBase}`);
+    }
+
+    console.log(`[BackendManager] Initialized in mode: "${config.mode}". Auto Failover: ${config.autoFailover}`);
+  }
+
   function getTargetUrl(path, backendKey) {
     const baseUrl = backendKey === 'render' ? getRenderBaseUrl() : getRailwayBaseUrl();
     if (!baseUrl) return path;
@@ -138,7 +158,7 @@
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
 
       const res = await fetch(healthUrl, {
         method: 'GET',
@@ -164,7 +184,7 @@
     } catch (err) {
       stats.status = 'offline';
       stats.responseTimeMs = 0;
-      stats.error = err.name === 'AbortError' ? 'Timeout (8s)' : (err.message || 'Network error');
+      stats.error = err.name === 'AbortError' ? 'Timeout (5s)' : (err.message || 'Network error');
     }
 
     notifyListeners('backend:health-updated', { backend: backendKey, stats });
@@ -173,7 +193,7 @@
 
   let healthCheckTimer = null;
 
-  function scheduleAdaptiveHealthCheck() {
+  function scheduleAdaptiveHealthCheck(immediate = false) {
     if (healthCheckTimer) {
       clearTimeout(healthCheckTimer);
       healthCheckTimer = null;
@@ -183,28 +203,40 @@
     const isRailwayOffline = backendStats.railway.status === 'offline';
     const interval = (config.mode === 'auto' && isRailwayOffline) ? 3000 : (config.pingIntervalMs || 15000);
 
-    healthCheckTimer = setTimeout(() => {
+    if (immediate) {
       checkHealthAll().catch(() => {});
-    }, interval);
+    } else {
+      healthCheckTimer = setTimeout(() => {
+        checkHealthAll().catch(() => {});
+      }, interval);
+    }
   }
 
   // Perform Health Checks on Both Backends
   async function checkHealthAll() {
+    const prevRailwayStatus = backendStats.railway.status;
+
     await Promise.all([
       pingBackend('railway'),
       pingBackend('render')
     ]);
+
+    if (prevRailwayStatus === 'offline' && backendStats.railway.status === 'online') {
+      console.log('[BackendManager] Railway backend recovered and is now healthy.');
+    }
 
     // Priority Check: Railway must always have highest priority in auto mode
     if (config.mode === 'auto') {
       if (backendStats.railway.status === 'online') {
         if (backendStats.currentActive !== 'railway') {
           backendStats.currentActive = 'railway';
+          console.log('[BackendManager] Primary routing restored to Railway.');
           notifyListeners('backend:switched', { active: 'railway', reason: 'Railway healthy, restored primary' });
         }
       } else if (backendStats.render.status === 'online') {
         if (backendStats.currentActive !== 'render') {
           backendStats.currentActive = 'render';
+          console.warn('[BackendManager] Railway offline. Switching active routing recommendation to Render.');
           notifyListeners('backend:switched', { active: 'render', reason: 'Railway offline, switched to Render' });
         }
       } else {
@@ -216,7 +248,7 @@
       backendStats.currentActive = config.mode;
     }
 
-    scheduleAdaptiveHealthCheck();
+    scheduleAdaptiveHealthCheck(false);
     return backendStats;
   }
 
@@ -269,11 +301,11 @@
     // Primary attempt
     const primaryUrl = getTargetUrl(urlPath, primaryBackend);
     let primaryError = null;
+    const primaryTimeoutMs = primaryBackend === 'railway' ? (options.timeout || 5000) : (options.timeout || 8000);
 
     try {
       const controller = new AbortController();
-      const timeoutMs = options.timeout || 12000;
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const timeoutId = setTimeout(() => controller.abort(), primaryTimeoutMs);
 
       const res = await fetch(primaryUrl, {
         ...requestOptions,
@@ -283,10 +315,6 @@
 
       // If response is successful or client-side error (4xx), return it directly (except 503 passive mode)
       if (res.status < 500 && res.status !== 503) {
-        if (primaryBackend === 'railway' && backendStats.railway.status !== 'online') {
-          backendStats.railway.status = 'online';
-          backendStats.railway.error = null;
-        }
         return res;
       }
 
@@ -294,9 +322,7 @@
         const clone = res.clone();
         const data = await clone.json().catch(() => ({}));
         if (data && data.passive && data.activeBackend) {
-          console.warn(`[BackendManager] Backend ${primaryBackend} is in PASSIVE mode. Switching active routing to ${data.activeBackend}.`);
-          backendStats.currentActive = data.activeBackend.toLowerCase();
-          notifyListeners('backend:switched', { active: data.activeBackend, reason: 'Backend reported passive mode' });
+          console.warn(`[BackendManager] [${reqId}] Backend ${primaryBackend} reported PASSIVE mode. Retrying current request on target ${data.activeBackend}.`);
           if (config.autoFailover) {
             const activeUrl = getTargetUrl(urlPath, data.activeBackend);
             return fetch(activeUrl, requestOptions);
@@ -310,14 +336,12 @@
       primaryError = new Error(`Server returned HTTP ${res.status}`);
 
     } catch (err) {
-      primaryError = err;
+      primaryError = err.name === 'AbortError' ? new Error(`Request timeout (${primaryTimeoutMs}ms)`) : err;
     }
 
-    // Mark primary backend offline if attempt failed
-    if (primaryBackend === 'railway') {
-      backendStats.railway.status = 'offline';
-      backendStats.railway.error = primaryError ? primaryError.message : 'Request failed';
-    }
+    // Do NOT set backendStats.railway.status = 'offline' from a single failed request!
+    // Instead, trigger a background health check to verify if Railway is actually offline.
+    scheduleAdaptiveHealthCheck(true);
 
     // If primary attempt succeeded or failover is disabled or no backup URL configured, throw/return error
     const backupUrl = getTargetUrl(urlPath, secondaryBackend);
@@ -326,7 +350,7 @@
     }
 
     // Trigger Automatic Failover Retry for current request
-    console.warn(`[BackendManager] Primary backend (${primaryBackend}) failed (${primaryError.message}). Retrying on secondary backend (${secondaryBackend})...`);
+    console.warn(`[BackendManager] [${reqId}] Primary backend (${primaryBackend}) failed (${primaryError.message}). Starting failover retry on secondary backend (${secondaryBackend})...`);
 
     backendStats.isFailingOver = true;
     notifyListeners('backend:failover', {
@@ -336,19 +360,10 @@
       url: urlPath
     });
 
-    // Schedule an immediate fast health re-check for Railway in background
-    setTimeout(() => {
-      pingBackend('railway').then(() => {
-        if (config.mode === 'auto' && backendStats.railway.status === 'online') {
-          backendStats.currentActive = 'railway';
-          notifyListeners('backend:switched', { active: 'railway', reason: 'Railway healthy, restored primary' });
-        }
-      }).catch(() => {});
-    }, 1000);
-
     try {
       const secondaryController = new AbortController();
-      const secondaryTimeout = setTimeout(() => secondaryController.abort(), 12000);
+      const secondaryTimeoutMs = options.timeout || 8000;
+      const secondaryTimeout = setTimeout(() => secondaryController.abort(), secondaryTimeoutMs);
 
       const backupRes = await fetch(backupUrl, {
         ...requestOptions,
@@ -357,13 +372,14 @@
       clearTimeout(secondaryTimeout);
 
       backendStats.isFailingOver = false;
+      console.log(`[BackendManager] [${reqId}] Failover request succeeded on secondary backend (${secondaryBackend}).`);
       // Do NOT set backendStats.currentActive = secondaryBackend permanently!
       // Failover applies ONLY to the current request.
       return backupRes;
 
     } catch (secondaryErr) {
       backendStats.isFailingOver = false;
-      console.error(`[BackendManager] Both backends failed for ${urlPath}!`, secondaryErr);
+      console.error(`[BackendManager] [${reqId}] Both backends failed for ${urlPath}!`, secondaryErr);
       throw new Error(`Both Railway and Render backends are unavailable (${primaryError.message} / ${secondaryErr.message})`);
     }
   }
@@ -555,6 +571,9 @@
       notifyListeners('backend:network-status', { online: false });
     });
   }
+
+  // Validate Configuration on Startup
+  validateStartupConfig();
 
   // Start background health ping loop
   checkHealthAll().catch(() => {});
