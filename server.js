@@ -52,6 +52,28 @@ const {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Global uncaught exception & unhandled promise rejection handlers to prevent process crashes
+process.on('uncaughtException', (err) => {
+  console.error('[CRITICAL] Uncaught Exception detected:', err.message, err.stack);
+  addSystemLog({
+    backend: CURRENT_PLATFORM,
+    eventType: 'ERROR',
+    status: 'ERROR',
+    details: `Uncaught Exception: ${err.message}`
+  });
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  const errMsg = reason instanceof Error ? reason.message : String(reason);
+  console.error('[CRITICAL] Unhandled Rejection detected:', errMsg);
+  addSystemLog({
+    backend: CURRENT_PLATFORM,
+    eventType: 'ERROR',
+    status: 'ERROR',
+    details: `Unhandled Rejection: ${errMsg}`
+  });
+});
+
 if (isFirebaseEnabled()) {
   initFirebase();
 } else {
@@ -226,12 +248,6 @@ app.get('/api/health', (req, res) => {
   const fbStatus = getFirebaseStatus();
   const systemMetrics = getSystemMetrics();
 
-  let driveConnected = false;
-  try {
-    const settingsSync = readSettingsSync ? readSettingsSync() : null;
-    driveConnected = !!(settingsSync && settingsSync.googleRefreshToken);
-  } catch (err) {}
-
   res.json({
     status: 'ok',
     platform: CURRENT_PLATFORM,
@@ -252,7 +268,7 @@ app.get('/api/health', (req, res) => {
       initTimeMs: cacheStatus.progress ? cacheStatus.progress.initTimeMs || 0 : 0
     },
     googleDrive: {
-      connected: driveConnected
+      connected: !!(process.env.GOOGLE_REFRESH_TOKEN)
     },
     system: {
       cpuPercent: systemMetrics ? systemMetrics.cpuPercent : 0,

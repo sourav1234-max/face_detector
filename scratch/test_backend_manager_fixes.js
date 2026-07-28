@@ -206,11 +206,12 @@ async function runTests() {
     await BM.checkHealth();
     assert(BM.getStats().currentActive === 'render', 'Phase A: Railway offline -> active switches to render');
 
-    // Phase B: Railway comes back online -> checkHealth MUST immediately restore Railway
+    // Phase B: Railway comes back online -> checkHealth restores Railway after recovery threshold (2 consecutive healthy checks)
     fetchMocks['railway.up.railway.app'] = async () => ({ ok: true, status: 200, json: async () => ({ uptimeSeconds: 200 }) });
 
     await BM.checkHealth();
-    assert(BM.getStats().currentActive === 'railway', 'Phase B: Railway back online -> active immediately restored to railway');
+    await BM.checkHealth();
+    assert(BM.getStats().currentActive === 'railway', 'Phase B: Railway back online -> active restored to railway after recovery threshold');
   }
 
   console.log('\n===========================================================');

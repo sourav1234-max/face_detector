@@ -14,8 +14,14 @@
     autoFailover: true,   // Automatically retry request on Render if Railway fails
     railwayUrl: typeof window !== 'undefined' && (window.RAILWAY_URL || (window.ENV && window.ENV.RAILWAY_URL)) ? (window.RAILWAY_URL || window.ENV.RAILWAY_URL) : '',
     renderUrl: typeof window !== 'undefined' && (window.RENDER_URL || (window.ENV && window.ENV.RENDER_URL)) ? (window.RENDER_URL || window.ENV.RENDER_URL) : '',
-    pingIntervalMs: 15000 // Background health check interval (15s)
+    pingIntervalMs: 30000 // Background health check interval (30s default)
   };
+
+  // Consecutive Failure / Success State Tracking for Stabilized Failover
+  let railwayFailCount = 0;
+  let railwaySuccessCount = 0;
+  const FAILOVER_FAILURE_THRESHOLD = 3;  // Require 3 consecutive failures before marking Railway offline
+  const RECOVERY_SUCCESS_THRESHOLD = 2;  // Require 2 consecutive successes before restoring Railway
 
   // Load saved configuration from localStorage
   try {
@@ -153,6 +159,15 @@
       return stats;
     }
 
+    // Optimization: Skip aggressive Render pings if Railway is healthy & Render was checked within 60s
+    if (backendKey === 'render' && backendStats.railway.status === 'online') {
+      const now = Date.now();
+      const lastCheck = stats.lastCheckTime ? new Date(stats.lastCheckTime).getTime() : 0;
+      if (now - lastCheck < 60000 && stats.status !== 'unknown') {
+        return stats;
+      }
+    }
+
     const healthUrl = baseUrl + '/api/health?t=' + Date.now();
     const startTime = Date.now();
 
@@ -171,18 +186,44 @@
 
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
-        stats.status = 'online';
+        
+        if (backendKey === 'railway') {
+          railwayFailCount = 0;
+          railwaySuccessCount++;
+          if (railwaySuccessCount >= RECOVERY_SUCCESS_THRESHOLD || stats.status === 'unknown') {
+            stats.status = 'online';
+          }
+        } else {
+          stats.status = 'online';
+        }
+
         stats.responseTimeMs = latency;
         stats.uptimeSeconds = data.uptimeSeconds || 0;
         stats.activeRequests = data.activeRequests || 0;
         stats.lastCheckTime = new Date().toISOString();
         stats.error = null;
       } else {
-        stats.status = 'offline';
+        if (backendKey === 'railway') {
+          railwaySuccessCount = 0;
+          railwayFailCount++;
+          if (railwayFailCount >= FAILOVER_FAILURE_THRESHOLD || stats.status === 'unknown') {
+            stats.status = 'offline';
+          }
+        } else {
+          stats.status = 'offline';
+        }
         stats.error = `HTTP ${res.status}`;
       }
     } catch (err) {
-      stats.status = 'offline';
+      if (backendKey === 'railway') {
+        railwaySuccessCount = 0;
+        railwayFailCount++;
+        if (railwayFailCount >= FAILOVER_FAILURE_THRESHOLD || stats.status === 'unknown') {
+          stats.status = 'offline';
+        }
+      } else {
+        stats.status = 'offline';
+      }
       stats.responseTimeMs = 0;
       stats.error = err.name === 'AbortError' ? 'Timeout (5s)' : (err.message || 'Network error');
     }
@@ -199,9 +240,9 @@
       healthCheckTimer = null;
     }
 
-    // Fast polling (3s) if Railway is offline in auto mode, else standard interval (15s)
-    const isRailwayOffline = backendStats.railway.status === 'offline';
-    const interval = (config.mode === 'auto' && isRailwayOffline) ? 3000 : (config.pingIntervalMs || 15000);
+    // Adaptive Interval: 10s if Railway is failing/offline, else standard interval (30s)
+    const isRailwayOffline = backendStats.railway.status === 'offline' || railwayFailCount > 0;
+    const interval = (config.mode === 'auto' && isRailwayOffline) ? 10000 : (config.pingIntervalMs || 30000);
 
     if (immediate) {
       checkHealthAll().catch(() => {});
@@ -236,7 +277,7 @@
       } else if (backendStats.render.status === 'online') {
         if (backendStats.currentActive !== 'render') {
           backendStats.currentActive = 'render';
-          console.warn('[BackendManager] Railway offline. Switching active routing recommendation to Render.');
+          console.warn('[BackendManager] Railway offline (confirmed via failure threshold). Switching active routing recommendation to Render.');
           notifyListeners('backend:switched', { active: 'render', reason: 'Railway offline, switched to Render' });
         }
       } else {
@@ -462,7 +503,16 @@
     }
   }
 
+  let cacheProgressPollCount = 0;
+  const MAX_CACHE_POLL_ATTEMPTS = 15; // Stop polling after 15s max
+
   async function checkCacheProgressLoop() {
+    cacheProgressPollCount++;
+    if (cacheProgressPollCount > MAX_CACHE_POLL_ATTEMPTS) {
+      removeOverlay();
+      return;
+    }
+
     try {
       const res = await fetch('/api/cache/progress?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
@@ -475,7 +525,11 @@
           }
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      if (cacheProgressPollCount >= MAX_CACHE_POLL_ATTEMPTS) {
+        removeOverlay();
+      }
+    }
   }
 
   // Check progress immediately on DOM ready
@@ -483,11 +537,11 @@
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
         checkCacheProgressLoop();
-        cacheOverlayPollTimer = setInterval(checkCacheProgressLoop, 400);
+        cacheOverlayPollTimer = setInterval(checkCacheProgressLoop, 1000);
       });
     } else {
       checkCacheProgressLoop();
-      cacheOverlayPollTimer = setInterval(checkCacheProgressLoop, 400);
+      cacheOverlayPollTimer = setInterval(checkCacheProgressLoop, 1000);
     }
   }
 
