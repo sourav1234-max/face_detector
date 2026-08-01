@@ -57,17 +57,49 @@ const GALLERY_PAGE_SIZE = 10; // images per page
 let currentGalleryPage = 0;
 
 function getPhotoUrl(filename, storageUrl, imageUrl) {
-  if (filename && filename.startsWith('drive:')) {
-    return `/api/drive/photo/${filename.split(':')[1]}`;
+  // 1. Check if any parameter is a Google Drive reference (starts with drive:)
+  for (const val of [filename, storageUrl, imageUrl]) {
+    if (typeof val === 'string' && val.startsWith('drive:')) {
+      return `/api/drive/photo/${val.split(':')[1]}`;
+    }
   }
-  if (storageUrl) return storageUrl;
-  if (imageUrl) return imageUrl;
-  if (!filename) return '';
-  if (filename.startsWith('firebase:')) {
-    const storagePath = filename.slice('firebase:'.length);
-    return `/api/storage/photo?path=${encodeURIComponent(storagePath)}`;
+
+  // 2. Check if any parameter is a Firebase reference (starts with firebase: or gs://)
+  let fbPath = '';
+  for (const val of [filename, storageUrl, imageUrl]) {
+    if (typeof val === 'string') {
+      if (val.startsWith('firebase:')) {
+        fbPath = val.slice('firebase:'.length);
+        break;
+      } else if (val.startsWith('gs://')) {
+        fbPath = val.replace(/^gs:\/\/[^\/]+\//, '');
+        break;
+      }
+    }
   }
-  return `/uploads/${filename}`;
+  if (fbPath) {
+    return `/api/storage/photo?path=${encodeURIComponent(fbPath)}`;
+  }
+
+  // 3. Check for valid absolute HTTP/HTTPS or data URLs
+  for (const val of [storageUrl, imageUrl, filename]) {
+    if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('data:'))) {
+      return val;
+    }
+  }
+
+  // 4. Handle relative/local storage path
+  const target = (storageUrl || imageUrl || filename || '').toString();
+  if (!target) return '';
+
+  if (target.startsWith('/') && !target.startsWith('//')) {
+    return target;
+  }
+
+  // Clean relative filename (strip any 'public/', 'uploads/', '/uploads/', or backslashes)
+  let cleanName = target.replace(/^(public[/\\])?(uploads[/\\])?/i, '').replace(/^[/\\]+/, '');
+  if (!cleanName) return '';
+  return `/uploads/${cleanName}`;
 }
 
 // --- Initialize and Load Models ---
@@ -858,7 +890,7 @@ function renderGalleryPage() {
       </div>
       ${badgeHtml}
       <div class="gallery-image-wrapper">
-        <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="gallery-image" alt="${photo.originalName || 'Photo'}" loading="lazy">
+        <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="gallery-image" alt="${photo.originalName || 'Photo'}" loading="lazy" onerror="this.onerror=null; this.src='/uploads/' + encodeURIComponent('${(photo.filename || photo.id || '').replace(/^(firebase:|drive:)/, '')}');">
         <div class="gallery-item-overlay">
           <div class="gallery-item-info">
             <p class="gallery-item-name">${photo.originalName || 'Untitled'}</p>
