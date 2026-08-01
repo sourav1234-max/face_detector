@@ -3383,116 +3383,23 @@ function setupHABackendControls() {
   if (!window.BackendManager) return;
 
   const cfg = window.BackendManager.getConfig();
-  const modeSelect = document.getElementById('ha-mode-select');
-  const failoverToggle = document.getElementById('ha-autofailover-toggle');
   const railwayInput = document.getElementById('ha-railway-url-input');
-  const renderInput = document.getElementById('ha-render-url-input');
-
-  if (modeSelect) {
-    modeSelect.value = cfg.mode || 'auto';
-    modeSelect.addEventListener('change', async (e) => {
-      const modeVal = e.target.value;
-      window.BackendManager.updateConfig({ mode: modeVal });
-      updateHARoutingBadge();
-
-      if (modeVal === 'railway' || modeVal === 'render') {
-        try {
-          await adminFetch('/api/admin/ha/switch', {
-            method: 'POST',
-            body: JSON.stringify({ targetBackend: modeVal, reason: `Admin selected ${modeVal.toUpperCase()} mode` })
-          });
-          toastSuccess('Active Backend Updated', `Firestore active backend set to: ${modeVal.toUpperCase()}`);
-        } catch (err) {
-          toastError('Backend Switch Failed', err.message);
-        }
-      } else {
-        toastInfo('Routing Updated', 'Active backend mode set to: AUTO');
-      }
-
-      setTimeout(updateHALiveDashboard, 1000);
-    });
-  }
-
-  if (failoverToggle) {
-    failoverToggle.checked = cfg.autoFailover !== false;
-    failoverToggle.addEventListener('change', async (e) => {
-      const isEnabled = e.target.checked;
-      window.BackendManager.updateConfig({ autoFailover: isEnabled });
-      try {
-        await adminFetch('/api/admin/ha/autofailover', {
-          method: 'POST',
-          body: JSON.stringify({ enabled: isEnabled })
-        });
-        toastInfo('Failover Policy', `Automatic failover ${isEnabled ? 'ENABLED' : 'DISABLED'}`);
-      } catch (err) {
-        toastError('Failover Update Failed', err.message);
-      }
-    });
-  }
 
   if (railwayInput) {
     railwayInput.value = cfg.railwayUrl || '';
     railwayInput.addEventListener('change', (e) => {
       window.BackendManager.updateConfig({ railwayUrl: e.target.value.trim() });
-      toastSuccess('Primary URL Saved', 'Railway Primary backend URL updated.');
-    });
-  }
-
-  if (renderInput) {
-    renderInput.value = cfg.renderUrl || '';
-    renderInput.addEventListener('change', (e) => {
-      window.BackendManager.updateConfig({ renderUrl: e.target.value.trim() });
-      toastSuccess('Backup URL Saved', 'Render backup backend URL updated.');
-    });
-  }
-
-  const switchRailwayBtn = document.getElementById('ha-switch-railway-btn');
-  if (switchRailwayBtn) {
-    switchRailwayBtn.addEventListener('click', async () => {
-      try {
-        toastInfo('Switching Backend', 'Setting active backend to Railway in Firestore...');
-        const res = await adminFetch('/api/admin/ha/switch', {
-          method: 'POST',
-          body: JSON.stringify({ targetBackend: 'railway', reason: 'Admin manual switch to Railway' })
-        });
-        if (res.success) {
-          toastSuccess('Switched to Railway', 'Railway is now the active primary backend.');
-          window.BackendManager.updateConfig({ mode: 'railway' });
-          setTimeout(updateHALiveDashboard, 1000);
-        }
-      } catch (err) {
-        toastError('Switch Failed', err.message);
-      }
-    });
-  }
-
-  const switchRenderBtn = document.getElementById('ha-switch-render-btn');
-  if (switchRenderBtn) {
-    switchRenderBtn.addEventListener('click', async () => {
-      try {
-        toastInfo('Switching Backend', 'Setting active backend to Render in Firestore...');
-        const res = await adminFetch('/api/admin/ha/switch', {
-          method: 'POST',
-          body: JSON.stringify({ targetBackend: 'render', reason: 'Admin manual switch to Render' })
-        });
-        if (res.success) {
-          toastSuccess('Switched to Render', 'Render is now the active secondary backend.');
-          window.BackendManager.updateConfig({ mode: 'render' });
-          setTimeout(updateHALiveDashboard, 1000);
-        }
-      } catch (err) {
-        toastError('Switch Failed', err.message);
-      }
+      toastSuccess('Railway URL Saved', 'Railway Primary backend URL updated.');
     });
   }
 
   const pingBtn = document.getElementById('ha-manual-health-btn');
   if (pingBtn) {
     pingBtn.addEventListener('click', async () => {
-      toastInfo('Health Check', 'Pinging Railway & Render backends...');
+      toastInfo('Health Check', 'Pinging Railway backend...');
       await window.BackendManager.checkHealth();
       await updateHALiveDashboard();
-      toastSuccess('Health Check Complete', 'Updated health metrics for all backends.');
+      toastSuccess('Health Check Complete', 'Updated health metrics for Railway backend.');
     });
   }
 
@@ -3575,7 +3482,6 @@ function setupHABackendControls() {
   }
 
   window.addEventListener('backend:health-updated', updateHALiveDashboard);
-  window.addEventListener('backend:switched', updateHARoutingBadge);
 
   updateHARoutingBadge();
   const authOverlayCheck = document.getElementById('admin-auth-overlay');
@@ -3595,24 +3501,10 @@ function setupHABackendControls() {
 
 function updateHARoutingBadge() {
   const badge = document.getElementById('ha-current-routing-badge');
-  if (!badge || !window.BackendManager) return;
-  const stats = window.BackendManager.getStats();
-  const cfg = window.BackendManager.getConfig();
-
-  if (cfg.mode === 'railway') {
-    badge.innerText = 'Routing: Railway (Fixed)';
-    badge.style.background = 'rgba(56,189,248,0.15)';
-    badge.style.color = '#38bdf8';
-  } else if (cfg.mode === 'render') {
-    badge.innerText = 'Routing: Render (Fixed)';
-    badge.style.background = 'rgba(192,132,252,0.15)';
-    badge.style.color = '#c084fc';
-  } else {
-    const active = stats.currentActive.toUpperCase();
-    badge.innerText = `Routing: Auto (${active} Active)`;
-    badge.style.background = stats.currentActive === 'railway' ? 'rgba(56,189,248,0.15)' : 'rgba(192,132,252,0.15)';
-    badge.style.color = stats.currentActive === 'railway' ? '#38bdf8' : '#c084fc';
-  }
+  if (!badge) return;
+  badge.innerText = 'Backend: Railway Primary';
+  badge.style.background = 'rgba(56,189,248,0.15)';
+  badge.style.color = '#38bdf8';
 }
 
 async function updateHALiveDashboard() {
@@ -3620,39 +3512,18 @@ async function updateHALiveDashboard() {
 
   const stats = window.BackendManager.getStats();
 
-  // 1. Fetch Server Detailed HA Status JSON
-  let haData = null;
-  try {
-    haData = await adminFetch('/api/admin/ha/status');
-  } catch (e) { }
-
-  const activeBackend = (haData && haData.haStatus && haData.haStatus.activeBackend)
-    ? haData.haStatus.activeBackend.toLowerCase()
-    : 'railway';
-
-  // 2. Update Railway Client Ping Stats & Role
+  // 1. Update Railway Client Ping Stats & Status
   const rStats = stats.railway;
   const rBadge = document.getElementById('ha-railway-status-badge');
   const rLatency = document.getElementById('ha-railway-latency');
   const rUptime = document.getElementById('ha-railway-uptime');
   const rRole = document.getElementById('ha-railway-role');
 
-  const isRailwayActive = activeBackend === 'railway';
-
   if (rBadge) {
     if (rStats.status === 'online') {
-      if (isRailwayActive) {
-        rBadge.className = 'badge badge-approved';
-        rBadge.innerText = 'Online (ACTIVE)';
-        rBadge.title = `Railway is currently ACTIVE and serving requests (${rStats.responseTimeMs}ms)`;
-      } else {
-        rBadge.className = 'badge';
-        rBadge.style.background = 'rgba(148,163,184,0.18)';
-        rBadge.style.color = '#cbd5e1';
-        rBadge.style.border = '1px solid rgba(148,163,184,0.3)';
-        rBadge.innerText = 'Online (PASSIVE)';
-        rBadge.title = `Railway is in PASSIVE / Standby mode (${rStats.responseTimeMs}ms)`;
-      }
+      rBadge.className = 'badge badge-approved';
+      rBadge.innerText = 'Online (Active)';
+      rBadge.title = `Railway is online and serving requests (${rStats.responseTimeMs}ms)`;
     } else if (rStats.status === 'offline') {
       rBadge.className = 'badge badge-rejected';
       rBadge.innerText = 'Offline / Error';
@@ -3665,68 +3536,14 @@ async function updateHALiveDashboard() {
   }
 
   if (rRole) {
-    if (isRailwayActive) {
-      rRole.innerText = 'ACTIVE (Serving Requests)';
-      rRole.style.color = '#38bdf8';
-    } else {
-      rRole.innerText = 'PASSIVE (Standby)';
-      rRole.style.color = '#94a3b8';
-    }
+    rRole.innerText = 'Active Backend';
+    rRole.style.color = '#38bdf8';
   }
 
   if (rLatency) rLatency.innerText = rStats.responseTimeMs > 0 ? `${rStats.responseTimeMs} ms` : '-';
   if (rUptime) rUptime.innerText = rStats.uptimeSeconds > 0 ? formatUptime(rStats.uptimeSeconds) : '-';
 
-  // 3. Update Render Client Ping Stats & Role
-  const rndStats = stats.render;
-  const rndBadge = document.getElementById('ha-render-status-badge');
-  const rndLatency = document.getElementById('ha-render-latency');
-  const rndUptime = document.getElementById('ha-render-uptime');
-  const rndRole = document.getElementById('ha-render-role');
-
-  const isRenderActive = activeBackend === 'render';
-
-  if (rndBadge) {
-    if (!rndStats.url) {
-      rndBadge.className = 'badge';
-      rndBadge.style.background = 'rgba(255,255,255,0.06)';
-      rndBadge.style.color = '#64748b';
-      rndBadge.innerText = 'Not Configured';
-      rndBadge.title = 'Render backup URL is not specified in settings';
-    } else if (rndStats.status === 'online') {
-      if (isRenderActive) {
-        rndBadge.className = 'badge badge-approved';
-        rndBadge.innerText = 'Online (ACTIVE)';
-        rndBadge.title = `Render is currently ACTIVE and serving requests (${rndStats.responseTimeMs}ms)`;
-      } else {
-        rndBadge.className = 'badge';
-        rndBadge.style.background = 'rgba(192,132,252,0.15)';
-        rndBadge.style.color = '#c084fc';
-        rndBadge.style.border = '1px solid rgba(192,132,252,0.3)';
-        rndBadge.innerText = 'Online (PASSIVE)';
-        rndBadge.title = `Render is in PASSIVE / Standby mode (${rndStats.responseTimeMs}ms)`;
-      }
-    } else {
-      rndBadge.className = 'badge badge-rejected';
-      rndBadge.innerText = 'Offline';
-      rndBadge.title = rndStats.error ? `Error: ${rndStats.error}` : 'Backup server ping failed';
-    }
-  }
-
-  if (rndRole) {
-    if (isRenderActive) {
-      rndRole.innerText = 'ACTIVE (Serving Requests)';
-      rndRole.style.color = '#c084fc';
-    } else {
-      rndRole.innerText = 'PASSIVE (Standby)';
-      rndRole.style.color = '#94a3b8';
-    }
-  }
-
-  if (rndLatency) rndLatency.innerText = rndStats.responseTimeMs > 0 ? `${rndStats.responseTimeMs} ms` : '-';
-  if (rndUptime) rndUptime.innerText = rndStats.uptimeSeconds > 0 ? formatUptime(rndStats.uptimeSeconds) : '-';
-
-  // 4. Update Detailed Stats JSON
+  // 2. Fetch System Status Details
   try {
     let sysData = null;
     try {
@@ -3736,73 +3553,67 @@ async function updateHALiveDashboard() {
       }
     } catch (fErr) {}
 
-    if (sysData && sysData.success && sysData.cache && sysData.system) {
-      const isRender = sysData.platform === 'RENDER';
-
-      // CPU / Memory / Requests for Active Backend (Primary is Railway or Local Server)
-      if (!isRender) {
+    if (sysData && sysData.success) {
+      if (sysData.system) {
         const rCpu = document.getElementById('ha-railway-cpu');
         const rMem = document.getElementById('ha-railway-mem');
         const rReq = document.getElementById('ha-railway-requests');
         if (rCpu) rCpu.innerText = `${sysData.system.cpuPercent}%`;
         if (rMem) rMem.innerText = `${sysData.system.memory.heapUsedMB} MB`;
         if (rReq) rReq.innerText = `${sysData.system.activeRequests} active`;
-      } else {
-        const rndCpu = document.getElementById('ha-render-cpu');
-        const rndMem = document.getElementById('ha-render-mem');
-        const rndReq = document.getElementById('ha-render-requests');
-        if (rndCpu) rndCpu.innerText = `${sysData.system.cpuPercent}%`;
-        if (rndMem) rndMem.innerText = `${sysData.system.memory.heapUsedMB} MB`;
-        if (rndReq) rndReq.innerText = `${sysData.system.activeRequests} active`;
       }
 
       // Metadata Cache UI
-      const cStatusBadge = document.getElementById('ha-cache-status-badge');
-      const cPhotos = document.getElementById('ha-cache-photos');
-      const cDesc = document.getElementById('ha-cache-descriptors');
-      const cEvents = document.getElementById('ha-cache-events');
-      const cSize = document.getElementById('ha-cache-size');
-      const cInitTime = document.getElementById('ha-cache-inittime');
-      const cLastRefresh = document.getElementById('ha-cache-lastrefresh');
+      if (sysData.cache) {
+        const cStatusBadge = document.getElementById('ha-cache-status-badge');
+        const cPhotos = document.getElementById('ha-cache-photos');
+        const cDesc = document.getElementById('ha-cache-descriptors');
+        const cEvents = document.getElementById('ha-cache-events');
+        const cSize = document.getElementById('ha-cache-size');
+        const cInitTime = document.getElementById('ha-cache-inittime');
+        const cLastRefresh = document.getElementById('ha-cache-lastrefresh');
 
-      if (cStatusBadge) {
-        cStatusBadge.innerText = sysData.cache.isInitialized ? 'Ready' : 'Loading...';
-        cStatusBadge.className = sysData.cache.isInitialized ? 'badge badge-approved' : 'badge badge-pending';
-      }
-      if (cPhotos) cPhotos.innerText = (sysData.cache.totalPhotos || 0).toLocaleString();
-      if (cDesc) cDesc.innerText = (sysData.cache.totalDescriptors || 0).toLocaleString();
-      if (cEvents) cEvents.innerText = (sysData.cache.totalEvents || 0).toLocaleString();
-      if (cSize) cSize.innerText = `${sysData.cache.cacheSizeMB || 0} MB`;
-      if (cInitTime) cInitTime.innerText = `${sysData.cache.progress.initTimeMs || 0} ms`;
-      if (cLastRefresh) {
-        cLastRefresh.innerText = sysData.cache.progress.lastRefresh
-          ? new Date(sysData.cache.progress.lastRefresh).toLocaleTimeString()
-          : 'Just now';
+        if (cStatusBadge) {
+          cStatusBadge.innerText = sysData.cache.isInitialized ? 'Ready' : 'Loading...';
+          cStatusBadge.className = sysData.cache.isInitialized ? 'badge badge-approved' : 'badge badge-pending';
+        }
+        if (cPhotos) cPhotos.innerText = (sysData.cache.totalPhotos || 0).toLocaleString();
+        if (cDesc) cDesc.innerText = (sysData.cache.totalDescriptors || 0).toLocaleString();
+        if (cEvents) cEvents.innerText = (sysData.cache.totalEvents || 0).toLocaleString();
+        if (cSize) cSize.innerText = `${sysData.cache.cacheSizeMB || 0} MB`;
+        if (cInitTime) cInitTime.innerText = `${sysData.cache.progress.initTimeMs || 0} ms`;
+        if (cLastRefresh) {
+          cLastRefresh.innerText = sysData.cache.progress.lastRefresh
+            ? new Date(sysData.cache.progress.lastRefresh).toLocaleTimeString()
+            : 'Just now';
+        }
       }
 
       // Firestore Stats UI
-      const fsBadge = document.getElementById('ha-firestore-status-badge');
-      const fsReads = document.getElementById('ha-fs-reads');
-      const fsWrites = document.getElementById('ha-fs-writes');
-      const fsDeletes = document.getElementById('ha-fs-deletes');
+      if (sysData.firestore) {
+        const fsBadge = document.getElementById('ha-firestore-status-badge');
+        const fsReads = document.getElementById('ha-fs-reads');
+        const fsWrites = document.getElementById('ha-fs-writes');
+        const fsDeletes = document.getElementById('ha-fs-deletes');
 
-      if (fsBadge) {
-        const st = sysData.firestore.status || 'Unknown';
-        fsBadge.innerText = st;
-        if (st === 'Connected') {
-          fsBadge.className = 'badge badge-approved';
-          fsBadge.title = `Connected to Firestore project ${sysData.firestore.projectId || ''}`;
-        } else if (st.includes('Failed') || st.includes('Error')) {
-          fsBadge.className = 'badge badge-rejected';
-          fsBadge.title = sysData.firestore.error || 'Firestore authentication or initialization failed';
-        } else {
-          fsBadge.className = 'badge badge-pending';
-          fsBadge.title = sysData.firestore.error || 'Firestore disabled or uninitialized';
+        if (fsBadge) {
+          const st = sysData.firestore.status || 'Unknown';
+          fsBadge.innerText = st;
+          if (st === 'Connected') {
+            fsBadge.className = 'badge badge-approved';
+            fsBadge.title = `Connected to Firestore project ${sysData.firestore.projectId || ''}`;
+          } else if (st.includes('Failed') || st.includes('Error')) {
+            fsBadge.className = 'badge badge-rejected';
+            fsBadge.title = sysData.firestore.error || 'Firestore authentication or initialization failed';
+          } else {
+            fsBadge.className = 'badge badge-pending';
+            fsBadge.title = sysData.firestore.error || 'Firestore disabled or uninitialized';
+          }
         }
+        if (fsReads) fsReads.innerText = (sysData.firestore.reads || 0).toLocaleString();
+        if (fsWrites) fsWrites.innerText = (sysData.firestore.writes || 0).toLocaleString();
+        if (fsDeletes) fsDeletes.innerText = (sysData.firestore.deletes || 0).toLocaleString();
       }
-      if (fsReads) fsReads.innerText = (sysData.firestore.reads || 0).toLocaleString();
-      if (fsWrites) fsWrites.innerText = (sysData.firestore.writes || 0).toLocaleString();
-      if (fsDeletes) fsDeletes.innerText = (sysData.firestore.deletes || 0).toLocaleString();
     }
   } catch (err) {
     console.warn('[HA Dashboard] Error fetching /api/system/status:', err.message);

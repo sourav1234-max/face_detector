@@ -1849,17 +1849,15 @@
         </div>
 
         <!-- ══════════════════════════════════════════════════════
-             DUAL BACKEND & HA MONITORING SECTION
+             BACKEND & SYSTEM MONITORING SECTION
         ══════════════════════════════════════════════════════ -->
         <div class="content-section" id="section-ha-backend">
           <div class="executive-header">
             <div>
-              <h2 class="executive-title"><i class="fa-solid fa-server" style="color:#38bdf8;"></i> Dual Backend Architecture & HA Monitoring</h2>
-              <div class="pbi-card-sub">Real-time status, health metrics, cache inspection, and failover management for Railway & Render</div>
+              <h2 class="executive-title"><i class="fa-solid fa-server" style="color:#38bdf8;"></i> Backend & System Status Monitoring</h2>
+              <div class="pbi-card-sub">Real-time status, health metrics, and RAM cache inspection for Railway primary backend</div>
             </div>
             <div class="executive-controls" style="display:flex; gap:8px; flex-wrap:wrap;">
-              <button class="btn btn-primary btn-sm" id="ha-switch-railway-btn" style="background:linear-gradient(135deg, #0284c7, #38bdf8); border:none;"><i class="fa-solid fa-train"></i> Switch to Railway</button>
-              <button class="btn btn-secondary btn-sm" id="ha-switch-render-btn" style="background:linear-gradient(135deg, #7c3aed, #c084fc); border:none; color:#fff;"><i class="fa-solid fa-cloud"></i> Switch to Render</button>
               <button class="btn btn-secondary btn-sm" id="ha-manual-health-btn"><i class="fa-solid fa-heart-pulse"></i> Health Check</button>
               <button class="btn btn-secondary btn-sm" id="ha-refresh-cache-btn"><i class="fa-solid fa-arrows-rotate"></i> Reload RAM Cache</button>
               <button class="btn btn-secondary btn-sm" id="ha-rebuild-index-btn"><i class="fa-solid fa-layer-group"></i> Rebuild Search Index</button>
@@ -1868,48 +1866,29 @@
             </div>
           </div>
 
-          <!-- HA Control Panel -->
+          <!-- Backend Configuration Panel -->
           <div class="dash-card" style="margin-top:20px; margin-bottom:20px; background: rgba(14,20,36,0.9); border: 1px solid rgba(56,189,248,0.25);">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
               <h3 style="font-size:16px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
-                <i class="fa-solid fa-sliders" style="color:#38bdf8;"></i> Backend Routing & Failover Controls
+                <i class="fa-solid fa-sliders" style="color:#38bdf8;"></i> Backend Server Configuration
               </h3>
-              <span class="badge" id="ha-current-routing-badge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); font-size:11px; padding:4px 10px;">Routing: Railway Primary</span>
+              <span class="badge" id="ha-current-routing-badge" style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); font-size:11px; padding:4px 10px;">Backend: Railway Server</span>
             </div>
-            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:16px;">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px;">
               <div>
-                <label class="form-label" style="font-size:12px;">Active Backend Routing Mode</label>
-                <select id="ha-mode-select" class="form-input" style="background:rgba(15,23,42,0.9);">
-                  <option value="auto">Auto (Railway Primary, Render Fallback)</option>
-                  <option value="railway">Railway Only (Primary)</option>
-                  <option value="render">Render Only (Backup)</option>
-                </select>
-              </div>
-              <div>
-                <label class="form-label" style="font-size:12px;">Automatic Failover Policy</label>
-                <div class="check-row" style="padding:10px 14px;">
-                  <input type="checkbox" id="ha-autofailover-toggle" checked>
-                  <label for="ha-autofailover-toggle" style="font-size:13px; font-weight:600; color:#fff;">Enable Failover on Timeout / 5xx</label>
-                </div>
-              </div>
-              <div>
-                <label class="form-label" style="font-size:12px;">Railway Primary URL (Optional)</label>
+                <label class="form-label" style="font-size:12px;">Railway Server URL (Optional for Vercel)</label>
                 <input type="url" id="ha-railway-url-input" class="form-input" placeholder="https://your-app.up.railway.app">
-              </div>
-              <div>
-                <label class="form-label" style="font-size:12px;">Render Backup URL (Optional)</label>
-                <input type="url" id="ha-render-url-input" class="form-input" placeholder="https://your-backup.onrender.com">
               </div>
             </div>
           </div>
 
           <!-- Backend Monitoring Cards Grid -->
-          <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-bottom:20px;">
+          <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-bottom:20px;">
             <!-- Railway Card -->
             <div class="kpi-tile" style="border-top:3px solid #38bdf8;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                 <span style="font-size:14px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
-                  <i class="fa-solid fa-train" style="color:#38bdf8;"></i> Railway Primary
+                  <i class="fa-solid fa-train" style="color:#38bdf8;"></i> Railway Primary Backend
                 </span>
                 <span class="badge" id="ha-railway-status-badge" style="background:rgba(52,211,153,0.2); color:#34d399; font-size:10px;">Checking...</span>
               </div>
@@ -1919,25 +1898,7 @@
                 <div><span style="color:#64748b;">CPU Usage:</span> <strong id="ha-railway-cpu" style="color:#fff;">-</strong></div>
                 <div><span style="color:#64748b;">RAM Memory:</span> <strong id="ha-railway-mem" style="color:#fff;">-</strong></div>
                 <div><span style="color:#64748b;">Active Requests:</span> <strong id="ha-railway-requests" style="color:#fff;">-</strong></div>
-                <div><span style="color:#64748b;">Role:</span> <strong id="ha-railway-role" style="color:#38bdf8;">Primary (Active)</strong></div>
-              </div>
-            </div>
-
-            <!-- Render Card -->
-            <div class="kpi-tile" style="border-top:3px solid #c084fc;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <span style="font-size:14px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
-                  <i class="fa-solid fa-cloud" style="color:#c084fc;"></i> Render Backup
-                </span>
-                <span class="badge" id="ha-render-status-badge" style="background:rgba(248,113,113,0.2); color:#f87171; font-size:10px;">Not Configured</span>
-              </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px;">
-                <div><span style="color:#64748b;">Response Time:</span> <strong id="ha-render-latency" style="color:#fff;">-</strong></div>
-                <div><span style="color:#64748b;">Uptime:</span> <strong id="ha-render-uptime" style="color:#fff;">-</strong></div>
-                <div><span style="color:#64748b;">CPU Usage:</span> <strong id="ha-render-cpu" style="color:#fff;">-</strong></div>
-                <div><span style="color:#64748b;">RAM Memory:</span> <strong id="ha-render-mem" style="color:#fff;">-</strong></div>
-                <div><span style="color:#64748b;">Active Requests:</span> <strong id="ha-render-requests" style="color:#fff;">-</strong></div>
-                <div><span style="color:#64748b;">Role:</span> <strong id="ha-render-role" style="color:#c084fc;">Backup (Standby)</strong></div>
+                <div><span style="color:#64748b;">Status:</span> <strong id="ha-railway-role" style="color:#38bdf8;">Active Backend</strong></div>
               </div>
             </div>
 

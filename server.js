@@ -35,8 +35,6 @@ const {
   deleteFromFirebaseStorage,
   getFirebaseFileStream,
   getHAStatus,
-  setActiveBackend,
-  toggleAutoFailover,
   updateBackendCacheMetricsInFirestore
 } = require('./lib/store');
 const { initFirebase, getFirebaseStatus } = require('./lib/firebase');
@@ -88,7 +86,7 @@ initRamCache().catch(err => {
 validateEnvironment();
 app.set('trust proxy', true);
 
-// Configure CORS for cross-origin requests between Vercel frontend, Railway, and Render backends
+// Configure CORS for cross-origin requests between Vercel frontend and Railway backend
 app.use(cors({
   origin: true,
   credentials: true,
@@ -143,42 +141,6 @@ app.use((req, res, next) => {
       message: 'Server is initializing metadata into RAM cache. Please wait...',
       progress: cacheStatus.progress,
       platform: CURRENT_PLATFORM
-    });
-  }
-
-  next();
-});
-
-// Active-Passive Dual Backend Enforcement Middleware
-app.use((req, res, next) => {
-  const reqPath = req.path;
-  // Always allow health checks, system status, telemetry, admin endpoints, static assets, and auth
-  if (
-    reqPath === '/' ||
-    reqPath === '/index.html' ||
-    reqPath === '/admin.html' ||
-    reqPath === '/api/health' ||
-    reqPath === '/api/system/status' ||
-    reqPath === '/api/cache/progress' ||
-    reqPath === '/api/cache/status' ||
-    reqPath.startsWith('/api/admin') ||
-    reqPath.startsWith('/api/ha') ||
-    reqPath.startsWith('/models') ||
-    reqPath.startsWith('/js') ||
-    reqPath.startsWith('/css') ||
-    /\.(html|css|js|png|jpg|jpeg|svg|ico|woff2|task|json|bin)$/i.test(reqPath)
-  ) {
-    return next();
-  }
-
-  const haStatus = getHAStatus();
-  if (!haStatus.isCurrentActive) {
-    return res.status(503).json({
-      success: false,
-      passive: true,
-      activeBackend: haStatus.activeBackend,
-      platform: CURRENT_PLATFORM,
-      message: `Backend platform (${CURRENT_PLATFORM}) is currently in PASSIVE mode. Requests are served by ${haStatus.activeBackend.toUpperCase()}.`
     });
   }
 
@@ -471,52 +433,6 @@ app.get('/api/admin/ha/status', async (req, res) => {
     },
     system: systemMetrics
   });
-});
-
-app.post('/api/admin/ha/switch', async (req, res) => {
-  if (!(await isValidAdminSession(req))) {
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
-  }
-
-  const targetBackend = (req.body && req.body.targetBackend) || req.query.targetBackend || req.query.target;
-  const reason = (req.body && req.body.reason) || req.query.reason;
-
-  if (!targetBackend || (targetBackend.toLowerCase() !== 'railway' && targetBackend.toLowerCase() !== 'render')) {
-    return res.status(400).json({ success: false, error: "targetBackend must be 'railway' or 'render'" });
-  }
-
-  try {
-    const updated = await setActiveBackend(targetBackend, reason || 'Switched by administrator via control panel');
-    // If target backend is THIS instance, refresh RAM cache immediately from Firestore
-    if (CURRENT_PLATFORM.toLowerCase() === targetBackend.toLowerCase() || (targetBackend.toLowerCase() === 'railway' && CURRENT_PLATFORM === 'LOCAL')) {
-      await refreshRamCache();
-    }
-    res.json({
-      success: true,
-      message: `Active backend successfully set to ${targetBackend.toUpperCase()}`,
-      haStatus: getHAStatus()
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/admin/ha/autofailover', async (req, res) => {
-  if (!(await isValidAdminSession(req))) {
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
-  }
-
-  const { enabled } = req.body;
-  try {
-    const updated = await toggleAutoFailover(enabled !== false);
-    res.json({
-      success: true,
-      message: `Automatic failover policy updated: ${enabled !== false ? 'ENABLED' : 'DISABLED'}`,
-      haStatus: getHAStatus()
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
 });
 
 app.post('/api/admin/ha/cache/reload', async (req, res) => {
