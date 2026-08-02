@@ -234,49 +234,65 @@ async function computeFaceDescriptorsWithTimeout(source, timeoutMs = 15000) {
 
 // Photo URL Helper (local / Google Drive / Firebase Storage)
 function getPhotoUrl(filename, storageUrl, imageUrl) {
+  let url = '';
   // 1. Check if any parameter is a Google Drive reference (starts with drive:)
   for (const val of [filename, storageUrl, imageUrl]) {
     if (typeof val === 'string' && val.startsWith('drive:')) {
-      return `/api/drive/photo/${val.split(':')[1]}`;
+      url = `/api/drive/photo/${val.split(':')[1]}`;
+      break;
     }
   }
 
   // 2. Check if any parameter is a Firebase reference (starts with firebase: or gs://)
-  let fbPath = '';
-  for (const val of [filename, storageUrl, imageUrl]) {
-    if (typeof val === 'string') {
-      if (val.startsWith('firebase:')) {
-        fbPath = val.slice('firebase:'.length);
-        break;
-      } else if (val.startsWith('gs://')) {
-        fbPath = val.replace(/^gs:\/\/[^\/]+\//, '');
-        break;
+  if (!url) {
+    let fbPath = '';
+    for (const val of [filename, storageUrl, imageUrl]) {
+      if (typeof val === 'string') {
+        if (val.startsWith('firebase:')) {
+          fbPath = val.slice('firebase:'.length);
+          break;
+        } else if (val.startsWith('gs://')) {
+          fbPath = val.replace(/^gs:\/\/[^\/]+\//, '');
+          break;
+        }
       }
     }
-  }
-  if (fbPath) {
-    return `/api/storage/photo?path=${encodeURIComponent(fbPath)}`;
+    if (fbPath) {
+      url = `/api/storage/photo?path=${encodeURIComponent(fbPath)}`;
+    }
   }
 
   // 3. Check for valid absolute HTTP/HTTPS or data URLs
-  for (const val of [storageUrl, imageUrl, filename]) {
-    if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('data:'))) {
-      return val;
+  if (!url) {
+    for (const val of [storageUrl, imageUrl, filename]) {
+      if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('data:'))) {
+        return val;
+      }
     }
   }
 
   // 4. Handle relative/local storage path
-  const target = (storageUrl || imageUrl || filename || '').toString();
-  if (!target) return '';
+  if (!url) {
+    const target = (storageUrl || imageUrl || filename || '').toString();
+    if (!target) return '';
 
-  if (target.startsWith('/') && !target.startsWith('//')) {
-    return target;
+    if (target.startsWith('/') && !target.startsWith('//')) {
+      url = target;
+    } else {
+      let cleanName = target.replace(/^(public[/\\])?(uploads[/\\])?/i, '').replace(/^[/\\]+/, '');
+      if (!cleanName) return '';
+      url = `/uploads/${cleanName}`;
+    }
   }
 
-  // Clean relative filename (strip any 'public/', 'uploads/', '/uploads/', or backslashes)
-  let cleanName = target.replace(/^(public[/\\])?(uploads[/\\])?/i, '').replace(/^[/\\]+/, '');
-  if (!cleanName) return '';
-  return `/uploads/${cleanName}`;
+  if (url && url.startsWith('/') && window.BackendManager && typeof window.BackendManager.getBackendUrl === 'function') {
+    const baseUrl = window.BackendManager.getBackendUrl();
+    if (baseUrl && baseUrl !== window.location.origin) {
+      url = baseUrl + url;
+    }
+  }
+
+  return url;
 }
 
 // --- Helper AJAX function with Auth Header & Dual Backend Support ---
@@ -1857,6 +1873,47 @@ function setupSettingsEvents() {
         }
       } catch (err) {
         console.error('Save default event error:', err);
+      }
+    });
+  }
+
+  // ── Studio Profile & Location Save ───────────────────────────
+  const saveStudioBtn = document.getElementById('save-studio-btn');
+  if (saveStudioBtn) {
+    saveStudioBtn.addEventListener('click', async () => {
+      const studioName = (document.getElementById('studio-name-input')?.value || '').trim();
+      const studioOwner = (document.getElementById('studio-owner-input')?.value || '').trim();
+      const studioPhone = (document.getElementById('studio-phone-input')?.value || '').trim();
+      const studioLocation = (document.getElementById('studio-location-input')?.value || '').trim();
+      const studioMapUrl = (document.getElementById('studio-map-url-input')?.value || '').trim();
+
+      const savedIndicator = document.getElementById('studio-saved-indicator');
+
+      try {
+        const res = await adminFetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studioName,
+            studioOwner,
+            studioPhone,
+            studioLocation,
+            studioMapUrl
+          })
+        });
+
+        if (res.success) {
+          if (savedIndicator) {
+            savedIndicator.style.display = 'block';
+            setTimeout(() => { savedIndicator.style.display = 'none'; }, 3000);
+          }
+          toastSuccess('Studio Details Saved', 'Studio profile & location details updated successfully.');
+        } else {
+          toastError('Save Failed', res.error || 'Failed to save studio details.');
+        }
+      } catch (err) {
+        console.error('Save studio details error:', err);
+        toastError('Save Failed', 'Network error while saving studio details.');
       }
     });
   }

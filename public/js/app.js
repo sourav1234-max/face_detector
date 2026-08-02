@@ -8,6 +8,25 @@ window.allEvents = [];
 let userSwitched = sessionStorage.getItem('user_switched_event') === 'true';
 let savedPublicEventId = userSwitched ? localStorage.getItem('public_active_event_id') : '';
 window.selectedEventId = savedPublicEventId || '';
+
+// Load cached gallery catalog immediately for instant photo rendering
+try {
+  const cacheKey = 'cached_gallery_catalog_' + (window.selectedEventId || 'default');
+  const cachedCat = sessionStorage.getItem(cacheKey) || localStorage.getItem(cacheKey) || sessionStorage.getItem('cached_gallery_catalog') || localStorage.getItem('cached_gallery_catalog');
+  if (cachedCat) {
+    const parsed = JSON.parse(cachedCat);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      window.galleryCatalog = parsed;
+    }
+  }
+  const cachedEvts = sessionStorage.getItem('cached_gallery_events') || localStorage.getItem('cached_gallery_events');
+  if (cachedEvts) {
+    const parsedEvts = JSON.parse(cachedEvts);
+    if (Array.isArray(parsedEvts) && parsedEvts.length > 0) {
+      window.allEvents = parsedEvts;
+    }
+  }
+} catch (e) {}
 window.uploadQueue = [];
 window.queryDescriptor = null;
 window.searchQueryDescriptor = null;
@@ -57,65 +76,80 @@ const GALLERY_PAGE_SIZE = 10; // images per page
 let currentGalleryPage = 0;
 
 function getPhotoUrl(filename, storageUrl, imageUrl) {
+  let url = '';
   // 1. Check if any parameter is a Google Drive reference (starts with drive:)
   for (const val of [filename, storageUrl, imageUrl]) {
     if (typeof val === 'string' && val.startsWith('drive:')) {
-      return `/api/drive/photo/${val.split(':')[1]}`;
+      url = `/api/drive/photo/${val.split(':')[1]}`;
+      break;
     }
   }
 
   // 2. Check if any parameter is a Firebase reference (starts with firebase: or gs://)
-  let fbPath = '';
-  for (const val of [filename, storageUrl, imageUrl]) {
-    if (typeof val === 'string') {
-      if (val.startsWith('firebase:')) {
-        fbPath = val.slice('firebase:'.length);
-        break;
-      } else if (val.startsWith('gs://')) {
-        fbPath = val.replace(/^gs:\/\/[^\/]+\//, '');
-        break;
+  if (!url) {
+    let fbPath = '';
+    for (const val of [filename, storageUrl, imageUrl]) {
+      if (typeof val === 'string') {
+        if (val.startsWith('firebase:')) {
+          fbPath = val.slice('firebase:'.length);
+          break;
+        } else if (val.startsWith('gs://')) {
+          fbPath = val.replace(/^gs:\/\/[^\/]+\//, '');
+          break;
+        }
       }
     }
-  }
-  if (fbPath) {
-    return `/api/storage/photo?path=${encodeURIComponent(fbPath)}`;
+    if (fbPath) {
+      url = `/api/storage/photo?path=${encodeURIComponent(fbPath)}`;
+    }
   }
 
   // 3. Check for valid absolute HTTP/HTTPS or data URLs
-  for (const val of [storageUrl, imageUrl, filename]) {
-    if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('data:'))) {
-      return val;
+  if (!url) {
+    for (const val of [storageUrl, imageUrl, filename]) {
+      if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('data:'))) {
+        return val;
+      }
     }
   }
 
   // 4. Handle relative/local storage path
-  const target = (storageUrl || imageUrl || filename || '').toString();
-  if (!target) return '';
+  if (!url) {
+    const target = (storageUrl || imageUrl || filename || '').toString();
+    if (!target) return '';
 
-  if (target.startsWith('/') && !target.startsWith('//')) {
-    return target;
+    if (target.startsWith('/') && !target.startsWith('//')) {
+      url = target;
+    } else {
+      let cleanName = target.replace(/^(public[/\\])?(uploads[/\\])?/i, '').replace(/^[/\\]+/, '');
+      if (!cleanName) return '';
+      url = `/uploads/${cleanName}`;
+    }
   }
 
-  // Clean relative filename (strip any 'public/', 'uploads/', '/uploads/', or backslashes)
-  let cleanName = target.replace(/^(public[/\\])?(uploads[/\\])?/i, '').replace(/^[/\\]+/, '');
-  if (!cleanName) return '';
-  return `/uploads/${cleanName}`;
+  if (url && url.startsWith('/') && window.BackendManager && typeof window.BackendManager.getBackendUrl === 'function') {
+    const baseUrl = window.BackendManager.getBackendUrl();
+    if (baseUrl && baseUrl !== window.location.origin) {
+      url = baseUrl + url;
+    }
+  }
+
+  return url;
 }
 
 // --- Initialize and Load Models ---
-async function initFaceApi() {
-  try {
-    await loadFaceApiModels();
-    const loader = document.getElementById('models-loader');
-    if (loader) {
-      loader.style.opacity = '0';
-      setTimeout(() => loader.classList.add('hidden'), 500);
-    }
-  } catch (err) {
-    console.error('Face API model load failed:', err);
+function initFaceApi() {
+  if (typeof loadFaceApiModels === 'function') {
+    loadFaceApiModels().then(() => {
+      const loader = document.getElementById('models-loader');
+      if (loader) {
+        loader.style.opacity = '0';
+        setTimeout(() => loader.classList.add('hidden'), 500);
+      }
+    }).catch(err => {
+      console.warn('[Face API] Non-blocking model load warning:', err);
+    });
   }
-  // Fetch initial gallery files
-  await fetchGallery();
 }
 
 // --- API Interactions ---
@@ -158,6 +192,16 @@ async function fetchGallery() {
       window.galleryHeading = result.galleryHeading || 'Gallery Catalog';
       window.allowPublicFaceAdjustment = result.allowPublicFaceAdjustment !== false;
       currentGalleryPage = 0;
+      
+      try {
+        const cacheKey = 'cached_gallery_catalog_' + (window.selectedEventId || 'default');
+        sessionStorage.setItem(cacheKey, JSON.stringify(window.galleryCatalog));
+        localStorage.setItem(cacheKey, JSON.stringify(window.galleryCatalog));
+        sessionStorage.setItem('cached_gallery_catalog', JSON.stringify(window.galleryCatalog));
+        localStorage.setItem('cached_gallery_catalog', JSON.stringify(window.galleryCatalog));
+        sessionStorage.setItem('cached_gallery_events', JSON.stringify(window.allEvents));
+        localStorage.setItem('cached_gallery_events', JSON.stringify(window.allEvents));
+      } catch (e) {}
       
       const headingEl = document.getElementById('gallery-catalog-heading');
       if (headingEl) {
@@ -285,7 +329,24 @@ async function deletePhoto(id) {
 
 // --- DOM Event Listeners & UI Navigation ---
 document.addEventListener('DOMContentLoaded', () => {
-  // Start AI models load
+  // Render cached catalog immediately for 0ms delay, or fast static load if new visitor
+  if (window.galleryCatalog && window.galleryCatalog.length > 0) {
+    updateGalleryUI();
+  } else {
+    renderGallerySkeleton();
+    // Fast static CDN fallback fetch for brand-new visitors (<30ms)
+    fetch('/gallery.json')
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0 && (!window.galleryCatalog || window.galleryCatalog.length === 0)) {
+          window.galleryCatalog = data;
+          updateGalleryUI();
+        }
+      })
+      .catch(() => {});
+  }
+
+  // Start AI models load asynchronously in background
   initFaceApi();
 
   // Tab switching setup
@@ -574,11 +635,28 @@ async function startBatchUpload() {
   window.publicBatchQueue.start();
 }
 
+function renderGallerySkeleton() {
+  const grid = document.getElementById('gallery-grid');
+  const emptyState = document.getElementById('empty-gallery-state');
+  if (!grid) return;
+  if (emptyState) emptyState.classList.add('hidden');
+  grid.classList.remove('hidden');
+  grid.innerHTML = '';
+  for (let i = 0; i < 8; i++) {
+    const skeleton = document.createElement('div');
+    skeleton.className = 'gallery-item skeleton-item';
+    skeleton.innerHTML = `
+      <div class="gallery-image-wrapper skeleton-wrapper" style="width:100%; aspect-ratio:4/3; background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s infinite; border-radius: var(--border-radius-md);"></div>
+    `;
+    grid.appendChild(skeleton);
+  }
+}
+
 function getFilteredGalleryPhotos() {
   if (!window.selectedEventId || window.selectedEventId === 'all') {
     return window.galleryCatalog;
   }
-  return window.galleryCatalog.filter(p => p.eventId === window.selectedEventId);
+  return window.galleryCatalog.filter(p => !p.eventId || p.eventId === window.selectedEventId);
 }
 
 // Update the gallery catalog grid in UI
@@ -884,13 +962,16 @@ function renderGalleryPage() {
       ? `<span class="faces-count-badge faces-count-badge-corner"><i class="fa-solid fa-user-tag"></i> ${facesCount}</span>`
       : '';
 
+    const isTopImage = i < 8;
+    const loadingAttr = isTopImage ? 'loading="eager" fetchpriority="high" decoding="async"' : 'loading="lazy" decoding="async"';
+
     itemEl.innerHTML = `
       <div class="gallery-item-checkbox" title="Select photo">
         <i class="fa-solid fa-check"></i>
       </div>
       ${badgeHtml}
       <div class="gallery-image-wrapper">
-        <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="gallery-image" alt="${photo.originalName || 'Photo'}" loading="lazy" onerror="this.onerror=null; this.src='/uploads/' + encodeURIComponent('${(photo.filename || photo.id || '').replace(/^(firebase:|drive:)/, '')}');">
+        <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="gallery-image" alt="${photo.originalName || 'Photo'}" ${loadingAttr} onerror="this.onerror=null; this.src='/uploads/' + encodeURIComponent('${(photo.filename || photo.id || '').replace(/^(firebase:|drive:)/, '')}');">
         <div class="gallery-item-overlay">
           <div class="gallery-item-info">
             <p class="gallery-item-name">${photo.originalName || 'Untitled'}</p>

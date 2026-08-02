@@ -1326,6 +1326,21 @@ app.get('/api/gallery', async (req, res) => {
       return status === 'approved' && isPublic === true && (publicEventIds.has(photoEvtId) || configuredDefaultEventId === 'all');
     });
 
+    // Keep static gallery.json updated for instant static fallback for new visitors
+    try {
+      const staticPath = path.join(__dirname, 'public', 'gallery.json');
+      const catalogSnippet = publicPhotos.slice(0, 100).map(p => ({
+        id: p.id,
+        filename: p.filename,
+        originalName: p.originalName,
+        storageUrl: p.storageUrl,
+        imageUrl: p.imageUrl,
+        timestamp: p.timestamp || p.uploadTime,
+        eventId: p.eventId || ''
+      }));
+      fs.writeFileSync(staticPath, JSON.stringify(catalogSnippet));
+    } catch (e) {}
+
     const publicEvents = availableEvents.map(evt => {
       const item = {
         ...evt,
@@ -2392,13 +2407,24 @@ async function getSharedDriveClient(req) {
   return drive;
 }
 
+const drivePhotoCacheDir = path.join(__dirname, 'public', 'uploads', '.drive_cache');
+if (!fs.existsSync(drivePhotoCacheDir)) {
+  try { fs.mkdirSync(drivePhotoCacheDir, { recursive: true }); } catch (e) {}
+}
+
 app.get('/api/drive/photo/:fileId', async (req, res) => {
   try {
     const fileId = req.params.fileId;
-    if (!fileId) return res.status(400).send('Missing fileId');
+    if (!fileId || /[^a-zA-Z0-9_-]/.test(fileId)) return res.status(400).send('Invalid fileId');
 
-    // 7-day aggressive HTTP caching for browser & CDN
     res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800, immutable');
+
+    const cachePath = path.join(drivePhotoCacheDir, `${fileId}.img`);
+    if (fs.existsSync(cachePath)) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Content-Disposition', 'inline');
+      return fs.createReadStream(cachePath).pipe(res);
+    }
 
     const drive = await getSharedDriveClient(req);
     if (!drive) {
@@ -2412,9 +2438,12 @@ app.get('/api/drive/photo/:fileId', async (req, res) => {
     );
 
     const contentType = (response.headers && response.headers['content-type']) || 'image/jpeg';
-
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', 'inline');
+
+    const writeStream = fs.createWriteStream(cachePath);
+    writeStream.on('error', (err) => console.warn('[Drive Photo Cache] Write error:', err.message));
+    response.data.pipe(writeStream);
     response.data.pipe(res);
   } catch (err) {
     console.error('Error fetching file from Google Drive:', err.message || err);

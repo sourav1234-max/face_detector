@@ -2859,3 +2859,13 @@ body.protected-event-no-rightclick #lightbox-img {
   transform: scale(1.1);
   border-color: #a78bfa;
 }
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
