@@ -35,8 +35,12 @@ const {
   deleteFromFirebaseStorage,
   getFirebaseFileStream,
   getHAStatus,
-  updateBackendCacheMetricsInFirestore
+  updateBackendCacheMetricsInFirestore,
+  syncStaticGalleryFile
 } = require('./lib/store');
+
+// Pre-warm RAM cache and static gallery file asynchronously on server boot
+initRamCache().catch(err => console.error('[Startup Cache] Warmup warning:', err.message));
 const { initFirebase, getFirebaseStatus } = require('./lib/firebase');
 const {
   CURRENT_PLATFORM,
@@ -1328,17 +1332,7 @@ app.get('/api/gallery', async (req, res) => {
 
     // Keep static gallery.json updated for instant static fallback for new visitors
     try {
-      const staticPath = path.join(__dirname, 'public', 'gallery.json');
-      const catalogSnippet = publicPhotos.slice(0, 100).map(p => ({
-        id: p.id,
-        filename: p.filename,
-        originalName: p.originalName,
-        storageUrl: p.storageUrl,
-        imageUrl: p.imageUrl,
-        timestamp: p.timestamp || p.uploadTime,
-        eventId: p.eventId || ''
-      }));
-      fs.writeFileSync(staticPath, JSON.stringify(catalogSnippet));
+      syncStaticGalleryFile(publicPhotos);
     } catch (e) {}
 
     const publicEvents = availableEvents.map(evt => {

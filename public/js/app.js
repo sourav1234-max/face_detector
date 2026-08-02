@@ -335,7 +335,8 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     renderGallerySkeleton();
     // Fast static CDN fallback fetch for brand-new visitors (<30ms)
-    fetch('/gallery.json')
+    const staticFetchFn = (window.BackendManager && window.BackendManager.fetch) ? window.BackendManager.fetch : fetch;
+    staticFetchFn('/gallery.json')
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data) && data.length > 0 && (!window.galleryCatalog || window.galleryCatalog.length === 0)) {
