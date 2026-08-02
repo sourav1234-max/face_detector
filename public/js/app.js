@@ -6,20 +6,27 @@
 window.galleryCatalog = [];
 window.allEvents = [];
 let userSwitched = sessionStorage.getItem('user_switched_event') === 'true';
-let savedPublicEventId = userSwitched ? localStorage.getItem('public_active_event_id') : '';
+let savedPublicEventId = userSwitched ? sessionStorage.getItem('public_active_event_id') : '';
 window.selectedEventId = savedPublicEventId || '';
+
+// Immediate top-level pre-fetch for brand new visitors so public gallery photos load as soon as possible (<10-30ms)
+if (!window.initialGalleryPromise) {
+  window.initialGalleryPromise = (window.BackendManager && window.BackendManager.fetch ? window.BackendManager.fetch('/gallery.json') : fetch('/gallery.json'))
+    .then(r => r.ok ? r.json() : null)
+    .catch(() => null);
+}
 
 // Load cached gallery catalog immediately for instant photo rendering
 try {
   const cacheKey = 'cached_gallery_catalog_' + (window.selectedEventId || 'default');
-  const cachedCat = sessionStorage.getItem(cacheKey) || localStorage.getItem(cacheKey) || sessionStorage.getItem('cached_gallery_catalog') || localStorage.getItem('cached_gallery_catalog');
+  const cachedCat = sessionStorage.getItem(cacheKey) || sessionStorage.getItem('cached_gallery_catalog');
   if (cachedCat) {
     const parsed = JSON.parse(cachedCat);
     if (Array.isArray(parsed) && parsed.length > 0) {
       window.galleryCatalog = parsed;
     }
   }
-  const cachedEvts = sessionStorage.getItem('cached_gallery_events') || localStorage.getItem('cached_gallery_events');
+  const cachedEvts = sessionStorage.getItem('cached_gallery_events');
   if (cachedEvts) {
     const parsedEvts = JSON.parse(cachedEvts);
     if (Array.isArray(parsedEvts) && parsedEvts.length > 0) {
@@ -179,7 +186,7 @@ async function fetchGallery() {
 
       if (!sessionStorage.getItem('user_switched_event') || !window.selectedEventId) {
         window.selectedEventId = window.defaultPublicEventId;
-        try { localStorage.setItem('public_active_event_id', window.selectedEventId); } catch (e) {}
+        try { sessionStorage.setItem('public_active_event_id', window.selectedEventId); } catch (e) {}
       }
 
       if (result.passcodeRequired) {
@@ -196,11 +203,8 @@ async function fetchGallery() {
       try {
         const cacheKey = 'cached_gallery_catalog_' + (window.selectedEventId || 'default');
         sessionStorage.setItem(cacheKey, JSON.stringify(window.galleryCatalog));
-        localStorage.setItem(cacheKey, JSON.stringify(window.galleryCatalog));
         sessionStorage.setItem('cached_gallery_catalog', JSON.stringify(window.galleryCatalog));
-        localStorage.setItem('cached_gallery_catalog', JSON.stringify(window.galleryCatalog));
         sessionStorage.setItem('cached_gallery_events', JSON.stringify(window.allEvents));
-        localStorage.setItem('cached_gallery_events', JSON.stringify(window.allEvents));
       } catch (e) {}
       
       const headingEl = document.getElementById('gallery-catalog-heading');
@@ -334,10 +338,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateGalleryUI();
   } else {
     renderGallerySkeleton();
-    // Fast static CDN fallback fetch for brand-new visitors (<30ms)
-    const staticFetchFn = (window.BackendManager && window.BackendManager.fetch) ? window.BackendManager.fetch : fetch;
-    staticFetchFn('/gallery.json')
-      .then(r => r.json())
+    // Fast pre-started static CDN fallback fetch for brand-new visitors (<10-30ms)
+    Promise.resolve(window.initialGalleryPromise)
       .then(data => {
         if (Array.isArray(data) && data.length > 0 && (!window.galleryCatalog || window.galleryCatalog.length === 0)) {
           window.galleryCatalog = data;
@@ -1846,7 +1848,7 @@ window.selectPublicEvent = function(eventId) {
 
   window.selectedEventId = eventId;
   try {
-    localStorage.setItem('public_active_event_id', window.selectedEventId);
+    sessionStorage.setItem('public_active_event_id', window.selectedEventId);
   } catch (e) {}
 
   const globalPicker = document.getElementById('global-event-picker');
@@ -2030,13 +2032,13 @@ function setupEventPasscodeModal() {
 
     if (openEvent) {
       window.selectedEventId = openEvent.id;
-      try { localStorage.setItem('public_active_event_id', openEvent.id); } catch (e) {}
+      try { sessionStorage.setItem('public_active_event_id', openEvent.id); } catch (e) {}
       const globalPicker = document.getElementById('global-event-picker');
       if (globalPicker) globalPicker.value = openEvent.id;
       fetchGallery();
     } else {
       window.selectedEventId = '';
-      try { localStorage.setItem('public_active_event_id', ''); } catch (e) {}
+      try { sessionStorage.setItem('public_active_event_id', ''); } catch (e) {}
       const globalPicker = document.getElementById('global-event-picker');
       if (globalPicker) globalPicker.value = '';
       window.galleryCatalog = [];
@@ -2076,7 +2078,7 @@ function setupEventPasscodeModal() {
           const unlockedId = pendingEventIdToUnlock;
           closeEventPasscodeModal();
           window.selectedEventId = unlockedId;
-          try { localStorage.setItem('public_active_event_id', unlockedId); } catch (e) {}
+          try { sessionStorage.setItem('public_active_event_id', unlockedId); } catch (e) {}
           await fetchGallery();
         } else {
           if (errorEl) {

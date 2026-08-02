@@ -22,11 +22,11 @@ function createMockEnvironment(hostname = 'localhost') {
   consoleWarns = [];
   consoleErrors = [];
 
-  const localStorageData = {};
-  const mockLocalStorage = {
-    getItem: (key) => localStorageData[key] || null,
-    setItem: (key, val) => { localStorageData[key] = String(val); },
-    removeItem: (key) => { delete localStorageData[key]; }
+  const sessionStorageData = {};
+  const mockSessionStorage = {
+    getItem: (key) => sessionStorageData[key] || null,
+    setItem: (key, val) => { sessionStorageData[key] = String(val); },
+    removeItem: (key) => { delete sessionStorageData[key]; }
   };
 
   const mockWindow = {
@@ -34,8 +34,7 @@ function createMockEnvironment(hostname = 'localhost') {
       origin: `https://${hostname}`,
       hostname: hostname
     },
-    localStorage: mockLocalStorage,
-    sessionStorage: mockLocalStorage,
+    sessionStorage: mockSessionStorage,
     dispatchEvent: (event) => {
       mockListeners.push(event);
     },
@@ -71,8 +70,8 @@ function createMockEnvironment(hostname = 'localhost') {
   };
 
   // Evaluate script in isolated context
-  const evalFn = new Function('window', 'global', 'navigator', 'fetch', 'localStorage', 'console', sourceCode);
-  evalFn(mockWindow, mockWindow, mockNavigator, mockFetch, mockLocalStorage, customConsole);
+  const evalFn = new Function('window', 'global', 'navigator', 'fetch', 'sessionStorage', 'console', sourceCode);
+  evalFn(mockWindow, mockWindow, mockNavigator, mockFetch, mockSessionStorage, customConsole);
 
   return { mockWindow, mockFetch };
 }

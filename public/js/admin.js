@@ -299,9 +299,7 @@ function getPhotoUrl(filename, storageUrl, imageUrl) {
 async function adminFetch(url, options = {}) {
   options.credentials = options.credentials || 'include';
   const headers = { ...options.headers };
-  const token = typeof sessionStorage !== 'undefined'
-    ? sessionStorage.getItem('admin_token')
-    : (typeof localStorage !== 'undefined' ? localStorage.getItem('admin_token') : null);
+  const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('admin_token') : null;
   if (token && !headers['Authorization']) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -452,7 +450,6 @@ async function verifyPasswordAndLoad(password) {
       if (result.token) {
         try {
           sessionStorage.setItem('admin_token', result.token);
-          localStorage.setItem('admin_token', result.token);
         } catch (e) {}
       }
       showAuthOverlay(false);
@@ -471,9 +468,7 @@ async function checkExistingAdminSession() {
   try {
     const fetchFn = (window.BackendManager && window.BackendManager.fetch) ? window.BackendManager.fetch : fetch;
     const headers = {};
-    const token = typeof sessionStorage !== 'undefined'
-      ? sessionStorage.getItem('admin_token')
-      : (typeof localStorage !== 'undefined' ? localStorage.getItem('admin_token') : null);
+    const token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('admin_token') : null;
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const response = await fetchFn('/api/admin/session-check', {
@@ -521,7 +516,6 @@ async function logoutAdmin() {
   if (confirm("Are you sure you want to log out from the Admin Dashboard?")) {
     try {
       sessionStorage.removeItem('admin_token');
-      localStorage.removeItem('admin_token');
       await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
     } catch (err) {
       console.error("Logout error:", err);

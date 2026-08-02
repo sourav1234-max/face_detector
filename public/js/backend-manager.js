@@ -16,9 +16,9 @@
     pingIntervalMs: 30000 // Background health check interval (30s default)
   };
 
-  // Load saved configuration from localStorage
+  // Load saved configuration from sessionStorage
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = sessionStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed.railwayUrl) config.railwayUrl = parsed.railwayUrl;
@@ -44,7 +44,7 @@
 
   function saveConfig() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(config));
     } catch (err) {
       console.warn('[BackendManager] Failed to save config:', err);
     }
@@ -192,7 +192,7 @@
       headers.set('x-backend-platform', 'RAILWAY');
     }
 
-    const passcode = localStorage.getItem('facematch_event_passcode');
+    const passcode = sessionStorage.getItem('facematch_event_passcode');
     if (passcode && !headers.has('x-event-passcode')) {
       headers.set('x-event-passcode', passcode);
     }
