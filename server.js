@@ -153,7 +153,7 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1d' }));
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: '365d', immutable: true }));
 
 // Memory storage works on Vercel (no persistent local disk)
 const upload = multer({
@@ -570,7 +570,11 @@ const DEFAULT_GOOGLE_DRIVE_FOLDER_NAME = 'FaceMatch_Photos';
 let cachedGoogleFolderId = '';
 
 function getGoogleDriveFileUrl(fileId) {
-  return fileId ? `https://drive.google.com/uc?export=view&id=${fileId}` : '';
+  return fileId ? `https://lh3.googleusercontent.com/d/${fileId}=w2048` : '';
+}
+
+function getGoogleDriveEdgeCdnUrl(fileId, width = 800) {
+  return fileId ? `https://lh3.googleusercontent.com/d/${fileId}=w${width}` : '';
 }
 
 function getGoogleDriveFileRoute(fileId) {
@@ -1376,9 +1380,27 @@ app.get('/api/gallery', async (req, res) => {
 
     publicPhotos.sort((a, b) => new Date(b.timestamp || b.uploadTime || 0) - new Date(a.timestamp || a.uploadTime || 0));
 
+    const enrichedPublicPhotos = publicPhotos.map(photo => {
+      let driveFileId = '';
+      for (const val of [photo.filename, photo.storageUrl, photo.imageUrl]) {
+        if (typeof val === 'string' && val.startsWith('drive:')) {
+          driveFileId = val.split(':')[1];
+          break;
+        }
+      }
+      if (driveFileId) {
+        return {
+          ...photo,
+          thumbnailUrl: `https://lh3.googleusercontent.com/d/${driveFileId}=w800`,
+          edgeCdnUrl: `https://lh3.googleusercontent.com/d/${driveFileId}=w2048`
+        };
+      }
+      return photo;
+    });
+
     res.json({
       success: true,
-      photos: publicPhotos,
+      photos: enrichedPublicPhotos,
       events: publicEvents,
       publicGalleryEnabled: true,
       galleryHeading,
@@ -2411,7 +2433,7 @@ app.get('/api/drive/photo/:fileId', async (req, res) => {
     const fileId = req.params.fileId;
     if (!fileId || /[^a-zA-Z0-9_-]/.test(fileId)) return res.status(400).send('Invalid fileId');
 
-    res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800, immutable');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
 
     const cachePath = path.join(drivePhotoCacheDir, `${fileId}.img`);
     if (fs.existsSync(cachePath)) {
@@ -2459,7 +2481,7 @@ app.get('/api/storage/photo', async (req, res) => {
 
     const { stream, contentType } = await getFirebaseFileStream(storagePath);
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800, immutable');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
     stream.pipe(res);
   } catch (err) {
     console.error('Error fetching Firebase Storage file:', err.message);

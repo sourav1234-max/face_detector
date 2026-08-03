@@ -82,56 +82,68 @@ let galleryRefreshTimer = null;
 const GALLERY_PAGE_SIZE = 10; // images per page
 let currentGalleryPage = 0;
 
-function getPhotoUrl(filename, storageUrl, imageUrl) {
-  let url = '';
-  // 1. Check if any parameter is a Google Drive reference (starts with drive:)
+function getDriveFileIdFromPhoto(filename, storageUrl, imageUrl) {
   for (const val of [filename, storageUrl, imageUrl]) {
     if (typeof val === 'string' && val.startsWith('drive:')) {
-      url = `/api/drive/photo/${val.split(':')[1]}`;
-      break;
+      return val.split(':')[1];
+    }
+  }
+  return '';
+}
+
+function getPhotoUrl(filename, storageUrl, imageUrl, preferThumbnail = true) {
+  // 1. Check for Google Drive reference -> Use ultra-fast Google Edge CDN (lh3.googleusercontent.com)
+  const driveFileId = getDriveFileIdFromPhoto(filename, storageUrl, imageUrl);
+  if (driveFileId) {
+    if (preferThumbnail) {
+      return `https://lh3.googleusercontent.com/d/${driveFileId}=w800`;
+    } else {
+      return `https://lh3.googleusercontent.com/d/${driveFileId}=w2048`;
     }
   }
 
   // 2. Check if any parameter is a Firebase reference (starts with firebase: or gs://)
-  if (!url) {
-    let fbPath = '';
-    for (const val of [filename, storageUrl, imageUrl]) {
-      if (typeof val === 'string') {
-        if (val.startsWith('firebase:')) {
-          fbPath = val.slice('firebase:'.length);
-          break;
-        } else if (val.startsWith('gs://')) {
-          fbPath = val.replace(/^gs:\/\/[^\/]+\//, '');
-          break;
-        }
+  let fbPath = '';
+  for (const val of [filename, storageUrl, imageUrl]) {
+    if (typeof val === 'string') {
+      if (val.startsWith('firebase:')) {
+        fbPath = val.slice('firebase:'.length);
+        break;
+      } else if (val.startsWith('gs://')) {
+        fbPath = val.replace(/^gs:\/\/[^\/]+\//, '');
+        break;
       }
     }
-    if (fbPath) {
-      url = `/api/storage/photo?path=${encodeURIComponent(fbPath)}`;
+  }
+  if (fbPath) {
+    let url = `/api/storage/photo?path=${encodeURIComponent(fbPath)}`;
+    if (window.BackendManager && typeof window.BackendManager.getBackendUrl === 'function') {
+      const baseUrl = window.BackendManager.getBackendUrl();
+      if (baseUrl && baseUrl !== window.location.origin) {
+        url = baseUrl + url;
+      }
     }
+    return url;
   }
 
   // 3. Check for valid absolute HTTP/HTTPS or data URLs
-  if (!url) {
-    for (const val of [storageUrl, imageUrl, filename]) {
-      if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('data:'))) {
-        return val;
-      }
+  for (const val of [storageUrl, imageUrl, filename]) {
+    if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('data:'))) {
+      return val;
     }
   }
 
   // 4. Handle relative/local storage path
-  if (!url) {
-    const target = (storageUrl || imageUrl || filename || '').toString();
-    if (!target) return '';
+  const target = (storageUrl || imageUrl || filename || '').toString();
+  if (!target) return '';
 
-    if (target.startsWith('/') && !target.startsWith('//')) {
-      url = target;
-    } else {
-      let cleanName = target.replace(/^(public[/\\])?(uploads[/\\])?/i, '').replace(/^[/\\]+/, '');
-      if (!cleanName) return '';
-      url = `/uploads/${cleanName}`;
-    }
+  let url = '';
+  if (target.startsWith('/') && !target.startsWith('//')) {
+    url = target;
+  } else {
+    let cleanName = target.replace(/^(public[/\\])?(uploads[/\\])?/i, '').replace(/^[/\\]+/, '');
+    if (!cleanName) return '';
+    url = `/uploads/${cleanName}`;
   }
 
   if (url && url.startsWith('/') && window.BackendManager && typeof window.BackendManager.getBackendUrl === 'function') {
@@ -142,6 +154,55 @@ function getPhotoUrl(filename, storageUrl, imageUrl) {
   }
 
   return url;
+}
+
+// Multi-stage fallback handler for gallery images
+function handlePhotoError(img, driveFileId, rawFilename) {
+  if (!img) return;
+  const stage = parseInt(img.getAttribute('data-fallback-stage') || '0', 10);
+  const cleanId = (driveFileId || '').replace(/^drive:/, '');
+
+  if (cleanId) {
+    if (stage === 0) {
+      // Stage 1 Fallback: Google Drive Thumbnail CDN
+      img.setAttribute('data-fallback-stage', '1');
+      img.src = `https://drive.google.com/thumbnail?id=${cleanId}&sz=w800`;
+      return;
+    } else if (stage === 1) {
+      // Stage 2 Fallback: Railway Proxy Endpoint
+      img.setAttribute('data-fallback-stage', '2');
+      let proxyUrl = `/api/drive/photo/${cleanId}`;
+      if (window.BackendManager && typeof window.BackendManager.getBackendUrl === 'function') {
+        const baseUrl = window.BackendManager.getBackendUrl();
+        if (baseUrl && baseUrl !== window.location.origin) {
+          proxyUrl = baseUrl + proxyUrl;
+        }
+      }
+      img.src = proxyUrl;
+      return;
+    }
+  }
+
+  if (stage < 3) {
+    // Stage 3 Fallback: Local Uploads directory
+    img.setAttribute('data-fallback-stage', '3');
+    let name = rawFilename || (cleanId ? cleanId : '');
+    name = name.replace(/^(firebase:|drive:)/, '');
+    if (name) {
+      let localUrl = `/uploads/${encodeURIComponent(name)}`;
+      if (window.BackendManager && typeof window.BackendManager.getBackendUrl === 'function') {
+        const baseUrl = window.BackendManager.getBackendUrl();
+        if (baseUrl && baseUrl !== window.location.origin) {
+          localUrl = baseUrl + localUrl;
+        }
+      }
+      img.src = localUrl;
+      return;
+    }
+  }
+
+  // Prevent infinite loop if all fallback stages fail
+  img.onerror = null;
 }
 
 // --- Initialize and Load Models ---
@@ -968,13 +1029,17 @@ function renderGalleryPage() {
     const isTopImage = i < 8;
     const loadingAttr = isTopImage ? 'loading="eager" fetchpriority="high" decoding="async"' : 'loading="lazy" decoding="async"';
 
+    const driveId = getDriveFileIdFromPhoto(photo.filename, photo.storageUrl, photo.imageUrl);
+    const photoSrc = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl, true);
+    const safeRawName = (photo.filename || photo.id || '').replace(/['"\\]/g, '');
+
     itemEl.innerHTML = `
       <div class="gallery-item-checkbox" title="Select photo">
         <i class="fa-solid fa-check"></i>
       </div>
       ${badgeHtml}
       <div class="gallery-image-wrapper">
-        <img src="${getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl)}" class="gallery-image" alt="${photo.originalName || 'Photo'}" ${loadingAttr} onerror="this.onerror=null; this.src='/uploads/' + encodeURIComponent('${(photo.filename || photo.id || '').replace(/^(firebase:|drive:)/, '')}');">
+        <img src="${photoSrc}" class="gallery-image" alt="${photo.originalName || 'Photo'}" ${loadingAttr} onerror="handlePhotoError(this, '${driveId}', '${safeRawName}')">
         <div class="gallery-item-overlay">
           <div class="gallery-item-info">
             <p class="gallery-item-name">${photo.originalName || 'Untitled'}</p>
@@ -1636,7 +1701,9 @@ function openLightbox(photo) {
   const downloadLink = document.getElementById('lightbox-download-link');
   const deleteBtn = document.getElementById('lightbox-delete-btn');
 
-  const photoUrl = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl);
+  const photoUrl = getPhotoUrl(photo.filename, photo.storageUrl, photo.imageUrl, false);
+  const driveId = getDriveFileIdFromPhoto(photo.filename, photo.storageUrl, photo.imageUrl);
+  img.onerror = () => handlePhotoError(img, driveId, photo.filename || photo.id);
 
   img.src = photoUrl;
   filename.innerText = photo.originalName;
