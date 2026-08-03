@@ -164,13 +164,8 @@ function handlePhotoError(img, driveFileId, rawFilename) {
 
   if (cleanId) {
     if (stage === 0) {
-      // Stage 1 Fallback: Google Drive Thumbnail CDN
+      // Direct Fallback: Proxy Endpoint (auto-fixes permission & caches)
       img.setAttribute('data-fallback-stage', '1');
-      img.src = `https://drive.google.com/thumbnail?id=${cleanId}&sz=w800`;
-      return;
-    } else if (stage === 1) {
-      // Stage 2 Fallback: Railway Proxy Endpoint
-      img.setAttribute('data-fallback-stage', '2');
       let proxyUrl = `/api/drive/photo/${cleanId}`;
       if (window.BackendManager && typeof window.BackendManager.getBackendUrl === 'function') {
         const baseUrl = window.BackendManager.getBackendUrl();

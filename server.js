@@ -1398,6 +1398,27 @@ app.get('/api/gallery', async (req, res) => {
       return photo;
     });
 
+    // Asynchronously repair Google Drive file permissions so Edge CDN links load instantly
+    (async () => {
+      try {
+        const drive = await getSharedDriveClient();
+        if (drive) {
+          for (const photo of publicPhotos) {
+            let fileId = '';
+            for (const val of [photo.filename, photo.storageUrl, photo.imageUrl]) {
+              if (typeof val === 'string' && val.startsWith('drive:')) {
+                fileId = val.split(':')[1];
+                break;
+              }
+            }
+            if (fileId) {
+              ensureGoogleDriveFilePublic(drive, fileId).catch(() => {});
+            }
+          }
+        }
+      } catch (e) {}
+    })();
+
     res.json({
       success: true,
       photos: enrichedPublicPhotos,
@@ -2428,6 +2449,26 @@ if (!fs.existsSync(drivePhotoCacheDir)) {
   try { fs.mkdirSync(drivePhotoCacheDir, { recursive: true }); } catch (e) {}
 }
 
+const publicPermissionCache = new Set();
+
+async function ensureGoogleDriveFilePublic(drive, fileId) {
+  if (!drive || !fileId || publicPermissionCache.has(fileId)) return;
+  publicPermissionCache.add(fileId);
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: { role: 'reader', type: 'anyone' }
+    });
+    console.log(`[GDrive Perm Repair] Granted public read access for file: ${fileId}`);
+  } catch (err) {
+    if (err && err.message && (err.message.includes('alreadyExists') || err.message.includes('cannotShare'))) {
+      // Permission already set
+    } else {
+      console.warn(`[GDrive Perm Repair] Notice for ${fileId}:`, err ? err.message : err);
+    }
+  }
+}
+
 app.get('/api/drive/photo/:fileId', async (req, res) => {
   try {
     const fileId = req.params.fileId;
@@ -2447,6 +2488,9 @@ app.get('/api/drive/photo/:fileId', async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       return res.status(400).send('Google Drive is not connected.');
     }
+
+    // Auto-fix public read permission on Google Drive in background so Edge CDN loads instantly
+    ensureGoogleDriveFilePublic(drive, fileId).catch(() => {});
 
     const response = await drive.files.get(
       { fileId: fileId, alt: 'media' },
