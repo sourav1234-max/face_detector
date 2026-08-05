@@ -12,7 +12,7 @@
   const config = {
     mode: 'railway',       // Fixed to Railway
     autoFailover: false,
-    railwayUrl: typeof window !== 'undefined' && (window.RAILWAY_URL || (window.ENV && window.ENV.RAILWAY_URL)) ? (window.RAILWAY_URL || window.ENV.RAILWAY_URL) : '',
+    railwayUrl: typeof window !== 'undefined' && (window.RAILWAY_URL || (window.ENV && window.ENV.RAILWAY_URL)) ? (window.RAILWAY_URL || window.ENV.RAILWAY_URL) : 'https://facedetector-production-0008.up.railway.app',
     pingIntervalMs: 30000 // Background health check interval (30s default)
   };
 
@@ -76,7 +76,7 @@
     if (isSameServer()) {
       return window.location.origin;
     }
-    return '';
+    return 'https://facedetector-production-0008.up.railway.app';
   }
 
   function validateStartupConfig() {

@@ -122,6 +122,7 @@ app.use((req, res, next) => {
     reqPath === '/' ||
     reqPath === '/index.html' ||
     reqPath === '/admin.html' ||
+    reqPath === '/gallery.json' ||
     reqPath === '/api/health' ||
     reqPath === '/api/system/status' ||
     reqPath === '/api/cache/progress' ||
