@@ -2066,7 +2066,7 @@ function verifyPythonSetup() {
     'py',
     'C:\\Users\\SOURAV SENAPATI\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'
   ];
-  const testScript = "import sys; import mediapipe; import PIL; import numpy; print('OK')";
+  const testScript = 'import sys; import mediapipe; import PIL; import numpy; print("OK")';
 
   const tryCheck = (index) => {
     if (index >= cmds.length) {
