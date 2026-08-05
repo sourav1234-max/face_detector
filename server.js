@@ -153,6 +153,54 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Instant static pre-fetch route for brand new visitors (<5-10ms response time)
+app.get('/gallery.json', async (req, res) => {
+  try {
+    const settings = await readSettings();
+    if (!settings.publicGalleryEnabled) {
+      return res.json([]);
+    }
+
+    const events = await readEventsDb();
+    const customPublicEvents = events.filter(e => e.id !== 'all' && e.showInPublicGallery !== false && e.status === 'active');
+    const publicEventIds = new Set(customPublicEvents.map(e => e.id));
+    const configuredDefaultEventId = settings.defaultPublicEventId || 'all';
+
+    const gallery = await readGalleryDb();
+    const publicPhotos = gallery.filter(photo => {
+      const status = photo.status === undefined ? 'approved' : photo.status;
+      const isPublic = photo.isPublic === undefined ? true : photo.isPublic;
+      const photoEvtId = photo.eventId || '';
+      if (!photoEvtId || photoEvtId === 'all') {
+        return status === 'approved' && isPublic === true;
+      }
+      return status === 'approved' && isPublic === true && (publicEventIds.has(photoEvtId) || configuredDefaultEventId === 'all');
+    });
+
+    const catalogSnippet = publicPhotos.slice(0, 100).map(p => ({
+      id: p.id,
+      filename: p.filename,
+      originalName: p.originalName,
+      storageUrl: p.storageUrl,
+      imageUrl: p.imageUrl,
+      timestamp: p.timestamp || p.uploadTime,
+      eventId: p.eventId || ''
+    }));
+
+    // Trigger static file sync in background
+    try {
+      syncStaticGalleryFile(gallery);
+    } catch (_) {}
+
+    res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
+    return res.json(catalogSnippet);
+  } catch (err) {
+    console.error('[Instant Gallery Endpoint Error]:', err.message);
+    return res.json([]);
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: '365d', immutable: true }));
 
 // Memory storage works on Vercel (no persistent local disk)

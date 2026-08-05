@@ -11,7 +11,8 @@ window.selectedEventId = savedPublicEventId || '';
 
 // Immediate top-level pre-fetch for brand new visitors so public gallery photos load as soon as possible (<10-30ms)
 if (!window.initialGalleryPromise) {
-  window.initialGalleryPromise = (window.BackendManager && window.BackendManager.fetch ? window.BackendManager.fetch('/gallery.json') : fetch('/gallery.json'))
+  const fetchFn = (window.BackendManager && typeof window.BackendManager.fetch === 'function') ? window.BackendManager.fetch : fetch;
+  window.initialGalleryPromise = fetchFn('/gallery.json')
     .then(r => r.ok ? r.json() : null)
     .catch(() => null);
 }
@@ -397,8 +398,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // Fast pre-started static CDN fallback fetch for brand-new visitors (<10-30ms)
     Promise.resolve(window.initialGalleryPromise)
       .then(data => {
-        if (Array.isArray(data) && data.length > 0 && (!window.galleryCatalog || window.galleryCatalog.length === 0)) {
-          window.galleryCatalog = data;
+        let photosList = null;
+        if (Array.isArray(data)) {
+          photosList = data;
+        } else if (data && Array.isArray(data.photos)) {
+          photosList = data.photos;
+        }
+        if (photosList && photosList.length > 0 && (!window.galleryCatalog || window.galleryCatalog.length === 0)) {
+          window.galleryCatalog = photosList;
+          try {
+            const cacheKey = 'cached_gallery_catalog_' + (window.selectedEventId || 'default');
+            sessionStorage.setItem(cacheKey, JSON.stringify(photosList));
+            sessionStorage.setItem('cached_gallery_catalog', JSON.stringify(photosList));
+          } catch (e) {}
           updateGalleryUI();
         }
       })
